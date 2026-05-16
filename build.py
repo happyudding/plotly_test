@@ -69,7 +69,10 @@ def main() -> None:
     CHART_DATA_PATH.write_text(json.dumps(payloads), encoding="utf-8")
     print(f"Wrote {CHART_DATA_PATH}")
 
-    page_builder.write_html(OUTPUT_PATH, first.subjects)
+    schools_info = [
+        {"name": name, "color": color_map[name]} for name in school_names
+    ]
+    page_builder.write_html(OUTPUT_PATH, first.subjects, schools_info)
     print(f"Wrote {OUTPUT_PATH}")
     print(f"Done in {time.perf_counter() - t0:.2f}s")
 

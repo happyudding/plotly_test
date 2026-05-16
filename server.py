@@ -25,7 +25,7 @@ _html_name = Path(OUTPUT_PATH).name
 @bp.get("/")
 def index():
     resp = send_from_directory(_html_dir, _html_name)
-    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 
@@ -35,5 +35,5 @@ def get_chart(subject_id):
     if payload is None:
         abort(404)
     resp = jsonify(payload)
-    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["Cache-Control"] = "no-cache"
     return resp

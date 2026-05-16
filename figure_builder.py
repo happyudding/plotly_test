@@ -65,7 +65,11 @@ def build_subject_figure(
     fig = go.Figure(
         layout=dict(
             title=dict(
-                text=f"{name}<br>({_fmt(lo)} ~ {_fmt(hi)} {unit})",
+                text=(
+                    f"<span style='font-size:16px'><b>{name}</b></span>"
+                    f"<br>"
+                    f"<span style='font-size:11px'>({_fmt(lo)} ~ {_fmt(hi)} {unit})</span>"
+                ),
                 font=dict(size=TITLE_FONT_SIZE),
                 x=0.5,
                 xanchor="center",
@@ -89,7 +93,7 @@ def build_subject_figure(
             yaxis=dict(
                 range=[0, 100],
                 fixedrange=True,
-                title="cum %",
+                title="",
                 tickmode="array",
                 tickvals=[0, 20, 40, 60, 80, 100],
                 ticktext=["0%", "20%", "40%", "60%", "80%", "100%"],
@@ -110,21 +114,10 @@ def build_subject_figure(
                 ),
             ),
             shapes=shapes,
-            margin=dict(l=55, r=20, t=55, b=40),
+            margin=dict(l=45, r=20, t=65, b=40),
             paper_bgcolor="white",
             plot_bgcolor="white",
-            showlegend=True,
-            legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=0.98,
-                xanchor="left",
-                x=0.02,
-                bgcolor="rgba(255,255,255,0.85)",
-                bordercolor="rgba(0,0,0,0.1)",
-                borderwidth=1,
-                font=dict(size=10),
-            ),
+            showlegend=False,
         ),
     )
 

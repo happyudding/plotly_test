@@ -26,7 +26,38 @@ HTML_TEMPLATE = """<!doctype html>
   }
   .topbar input#search-input:focus { border-color: #4a90e2; }
   .topbar input#search-input.no-match { border-color: #e57373; background: #fff5f5; }
-  .content { padding: 16px; }
+  .content { padding: 16px 156px 16px 16px; }
+  .sidebar {
+    position: fixed;
+    right: 0;
+    top: 48px;
+    bottom: 0;
+    width: 140px;
+    background: #fff;
+    border-left: 1px solid #ddd;
+    padding: 12px 10px;
+    overflow-y: auto;
+    z-index: 80;
+    box-sizing: border-box;
+  }
+  .sidebar-title {
+    font-size: 11px; color: #666; margin: 0 0 8px 2px; font-weight: 600;
+  }
+  .sidebar-hint { font-size: 10px; color: #999; margin-bottom: 8px; }
+  .sidebar-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 5px 8px; margin-bottom: 4px;
+    border: 1px solid #e0e0e0; border-radius: 4px;
+    background: #fff; cursor: pointer; font-size: 12px;
+    text-align: left; transition: opacity 0.1s, background 0.1s;
+    font-family: inherit;
+  }
+  .sidebar-item:hover { background: #f5f5f5; }
+  .sidebar-item.off { opacity: 0.35; text-decoration: line-through; }
+  .sidebar-item .swatch {
+    width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.1);
+  }
   .grid {
     display: grid;
     grid-template-columns: repeat(__COLS__, 1fr);
@@ -61,12 +92,46 @@ HTML_TEMPLATE = """<!doctype html>
     15%  { box-shadow: 0 0 0 6px rgba(255,193,7,0.7); border-color: #ffc107; }
     100% { box-shadow: 0 0 0 0 rgba(255,193,7,0); }
   }
+  .note {
+    position: absolute;
+    background: #fff8c5;
+    border: 1px solid #d4a72c;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 120px;
+    min-height: 70px;
+    resize: both;
+  }
+  .note-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2px 4px;
+    background: rgba(0,0,0,0.06);
+    user-select: none;
+    cursor: move;
+  }
+  .note-drag { color: #666; padding: 2px 6px; font-size: 12px; }
+  .note-del {
+    border: none; background: transparent; cursor: pointer;
+    font-size: 16px; color: #888; width: 22px; height: 22px;
+    border-radius: 50%; padding: 0; line-height: 1;
+  }
+  .note-del:hover { background: rgba(0,0,0,0.1); color: #c00; }
+  .note-body {
+    flex: 1; padding: 6px 8px; outline: none; overflow: auto;
+    font-size: 13px; line-height: 1.4; background: transparent;
+  }
   .cell .modebar-container, .cell .modebar { display: none !important; }
   .cell.active .modebar-container, .cell.active .modebar {
     display: flex !important;
     position: fixed !important;
     top: 6px !important;
-    right: 24px !important;
+    right: 156px !important;
     z-index: 200 !important;
     background: rgba(255,255,255,0.96) !important;
     padding: 2px 6px !important;
@@ -80,6 +145,7 @@ HTML_TEMPLATE = """<!doctype html>
 <div class="topbar">
   <h1>Cumulative Distribution (n=__N__)</h1>
   <input id="search-input" type="text" placeholder="검색 (Enter: 해당 차트로 이동)" autocomplete="off">
+  <button id="btn-add-note" type="button" title="메모 추가" style="padding:5px 10px;cursor:pointer;background:#fff8c5;border:1px solid #d4a72c;border-radius:4px;font-size:13px;">+ 메모</button>
   <span class="active-label">활성: <strong id="active-name">셀에 마우스를 올리세요</strong></span>
 </div>
 <div class="content">
@@ -87,6 +153,11 @@ HTML_TEMPLATE = """<!doctype html>
 __CELLS__
   </div>
 </div>
+<aside class="sidebar">
+  <div class="sidebar-title">학교</div>
+  <div class="sidebar-hint">클릭=숨김 토글</div>
+__SIDEBAR_ITEMS__
+</aside>
 <script>
 const cfg = {
   scrollZoom: true,
@@ -97,6 +168,42 @@ const cfg = {
 };
 const inflight = new Map();
 let activeCell = null;
+
+const HIDDEN_KEY = 'dashboard-hidden-schools-v1';
+let hiddenSchools = new Set();
+try { hiddenSchools = new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]')); } catch (_) {}
+function saveHidden() { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...hiddenSchools])); }
+
+function applyHiddenToData(traces) {
+  for (const t of traces) t.visible = !hiddenSchools.has(t.name);
+  return traces;
+}
+
+function syncSidebarUI() {
+  document.querySelectorAll('.sidebar-item').forEach((el) => {
+    el.classList.toggle('off', hiddenSchools.has(el.dataset.school));
+  });
+}
+
+function toggleSchool(name) {
+  if (hiddenSchools.has(name)) hiddenSchools.delete(name);
+  else hiddenSchools.add(name);
+  saveHidden();
+  syncSidebarUI();
+  document.querySelectorAll('.cell.loaded').forEach((cell) => {
+    const div = cell.querySelector('.plot');
+    if (!div || !div.data) return;
+    const vis = div.data.map((t) => !hiddenSchools.has(t.name));
+    try { Plotly.restyle(div, { visible: vis }); } catch (_) {}
+  });
+}
+
+document.querySelector('.sidebar').addEventListener('click', (e) => {
+  const item = e.target.closest('.sidebar-item');
+  if (!item) return;
+  toggleSchool(item.dataset.school);
+});
+syncSidebarUI();
 
 const activeNameEl = document.getElementById('active-name');
 function updateActiveLabel() {
@@ -114,7 +221,7 @@ const observer = new IntersectionObserver(async (entries) => {
       const ctrl = new AbortController();
       inflight.set(cell, ctrl);
       try {
-        const resp = await fetch(`./api/chart/${cell.dataset.id}`, { signal: ctrl.signal });
+        const resp = await fetch(`./api/chart/${cell.dataset.id}?_=${Date.now()}`, { signal: ctrl.signal, cache: 'no-store' });
         if (!resp.ok) throw new Error('http ' + resp.status);
         const p = await resp.json();
         if (ctrl.signal.aborted) continue;
@@ -124,6 +231,7 @@ const observer = new IntersectionObserver(async (entries) => {
           div.className = 'plot';
           cell.appendChild(div);
         }
+        applyHiddenToData(p.data);
         await Plotly.newPlot(div, p.data, p.layout, cfg);
         cell.classList.add('loaded');
         cell.dataset.loaded = '1';
@@ -186,6 +294,80 @@ searchInput.addEventListener('input', () => {
   }, 150);
 });
 
+const NOTE_KEY = 'dashboard-notes-v1';
+let notes = (() => {
+  try { return JSON.parse(localStorage.getItem(NOTE_KEY) || '[]'); }
+  catch { return []; }
+})();
+function saveNotes() { localStorage.setItem(NOTE_KEY, JSON.stringify(notes)); }
+
+function renderNote(note) {
+  const el = document.createElement('div');
+  el.className = 'note';
+  el.dataset.id = note.id;
+  el.style.left = note.x + 'px';
+  el.style.top  = note.y + 'px';
+  if (note.w) el.style.width  = note.w + 'px';
+  if (note.h) el.style.height = note.h + 'px';
+  el.innerHTML = '<div class="note-header"><span class="note-drag">⋮⋮ 드래그</span><button class="note-del" title="삭제">×</button></div><div class="note-body" contenteditable="true"></div>';
+  el.querySelector('.note-body').innerHTML = note.text || '';
+  document.body.appendChild(el);
+  wireNote(el, note);
+  return el;
+}
+
+function wireNote(el, note) {
+  const header = el.querySelector('.note-header');
+  let drag = null;
+  header.addEventListener('pointerdown', (e) => {
+    if (e.target.classList.contains('note-del')) return;
+    drag = { sx: e.clientX, sy: e.clientY, nx: parseFloat(el.style.left), ny: parseFloat(el.style.top) };
+    header.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  header.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    el.style.left = (drag.nx + e.clientX - drag.sx) + 'px';
+    el.style.top  = (drag.ny + e.clientY - drag.sy) + 'px';
+  });
+  header.addEventListener('pointerup', () => {
+    if (!drag) return;
+    drag = null;
+    note.x = parseFloat(el.style.left);
+    note.y = parseFloat(el.style.top);
+    saveNotes();
+  });
+  el.querySelector('.note-del').addEventListener('click', () => {
+    el.remove();
+    notes = notes.filter(n => n.id !== note.id);
+    saveNotes();
+  });
+  const body = el.querySelector('.note-body');
+  body.addEventListener('blur', () => { note.text = body.innerHTML; saveNotes(); });
+  const ro = new ResizeObserver(() => {
+    note.w = el.offsetWidth;
+    note.h = el.offsetHeight;
+    saveNotes();
+  });
+  ro.observe(el);
+}
+
+notes.forEach(renderNote);
+
+document.getElementById('btn-add-note').addEventListener('click', () => {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const note = {
+    id,
+    x: window.scrollX + Math.max(40, window.innerWidth / 2 - 110),
+    y: window.scrollY + Math.max(80, window.innerHeight / 2 - 60),
+    w: 220, h: 130, text: '',
+  };
+  notes.push(note);
+  saveNotes();
+  const el = renderNote(note);
+  el.querySelector('.note-body').focus();
+});
+
 searchInput.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   e.preventDefault();
@@ -220,8 +402,20 @@ def _cell_html(subject_id: int, name: str) -> str:
     return f'    <div class="cell" data-id="{subject_id}" data-name="{safe_name}"></div>'
 
 
-def write_html(out_path: Path, subjects: list[str]) -> None:
+def _sidebar_item_html(school: dict) -> str:
+    name = str(school["name"]).replace('"', "&quot;")
+    color = str(school["color"]).replace('"', "&quot;")
+    return (
+        f'  <button class="sidebar-item" type="button" data-school="{name}">'
+        f'<span class="swatch" style="background:{color}"></span>'
+        f'<span class="label">{name}</span>'
+        f'</button>'
+    )
+
+
+def write_html(out_path: Path, subjects: list[str], schools: list[dict]) -> None:
     cells = "\n".join(_cell_html(i, name) for i, name in enumerate(subjects))
+    sidebar_items = "\n".join(_sidebar_item_html(s) for s in schools)
     html = (
         HTML_TEMPLATE
         .replace("__COLS__", str(COLS_PER_ROW))
@@ -229,6 +423,7 @@ def write_html(out_path: Path, subjects: list[str]) -> None:
         .replace("__AH__", str(CELL_ASPECT_H))
         .replace("__N__", str(len(subjects)))
         .replace("__CELLS__", cells)
+        .replace("__SIDEBAR_ITEMS__", sidebar_items)
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
