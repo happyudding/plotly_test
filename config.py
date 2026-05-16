@@ -2,7 +2,8 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
 
-EXCEL_PATH = ROOT_DIR / "test_data_50subjects_300students_normalized_unique.xlsx"
+INPUT_DIR = ROOT_DIR
+SCHOOL_FILES_GLOB = "*_school.csv"
 
 OUTPUT_DIR = ROOT_DIR / "output"
 OUTPUT_PATH = OUTPUT_DIR / "cumulative.html"

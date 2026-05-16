@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from config import (
     LIMIT_COLOR,
     LIMIT_LINE_WIDTH,
-    LINE_COLOR,
     MARKER_SIZE,
     TITLE_FONT_SIZE,
     X_RANGE_PADDING_RATIO,
@@ -19,8 +18,7 @@ def _fmt(v) -> str:
 
 
 def build_subject_figure(
-    xs: np.ndarray,
-    ys: np.ndarray,
+    traces: list[dict],
     lo: float | None,
     hi: float | None,
     name: str,
@@ -47,8 +45,10 @@ def build_subject_figure(
         )
 
     domain_vals = []
-    if xs.size > 0:
-        domain_vals.extend([float(xs.min()), float(xs.max())])
+    for t in traces:
+        xs = t["xs"]
+        if xs.size > 0:
+            domain_vals.extend([float(xs.min()), float(xs.max())])
     if lo is not None and not pd.isna(lo):
         domain_vals.append(float(lo))
     if hi is not None and not pd.isna(hi):
@@ -63,16 +63,6 @@ def build_subject_figure(
         xrange = None
 
     fig = go.Figure(
-        data=[
-            go.Scatter(
-                x=xs.tolist() if isinstance(xs, np.ndarray) else xs,
-                y=ys.tolist() if isinstance(ys, np.ndarray) else ys,
-                mode="markers",
-                marker=dict(color=LINE_COLOR, size=MARKER_SIZE),
-                hovertemplate="score: %{x}<br>cum%: %{y:.2f}<extra></extra>",
-                showlegend=False,
-            )
-        ],
         layout=dict(
             title=dict(
                 text=f"{name}<br>({_fmt(lo)} ~ {_fmt(hi)} {unit})",
@@ -80,12 +70,83 @@ def build_subject_figure(
                 x=0.5,
                 xanchor="center",
             ),
-            xaxis=dict(range=xrange, title="score"),
-            yaxis=dict(range=[0, 100], fixedrange=True, title="cum %"),
+            xaxis=dict(
+                range=xrange,
+                title="score",
+                ticks="outside",
+                tickcolor="#666",
+                ticklen=6,
+                showgrid=True,
+                gridcolor="#eee",
+                zeroline=False,
+                minor=dict(
+                    ticks="outside",
+                    ticklen=3,
+                    tickcolor="#bbb",
+                    showgrid=False,
+                ),
+            ),
+            yaxis=dict(
+                range=[0, 100],
+                fixedrange=True,
+                title="cum %",
+                tickmode="array",
+                tickvals=[0, 20, 40, 60, 80, 100],
+                ticktext=["0%", "20%", "40%", "60%", "80%", "100%"],
+                ticks="outside",
+                tickcolor="#666",
+                ticklen=6,
+                showgrid=True,
+                gridcolor="#eee",
+                zeroline=False,
+                minor=dict(
+                    tickmode="linear",
+                    tick0=0,
+                    dtick=5,
+                    ticks="outside",
+                    ticklen=3,
+                    tickcolor="#bbb",
+                    showgrid=False,
+                ),
+            ),
             shapes=shapes,
-            margin=dict(l=50, r=20, t=50, b=40),
+            margin=dict(l=55, r=20, t=55, b=40),
             paper_bgcolor="white",
             plot_bgcolor="white",
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=0.98,
+                xanchor="left",
+                x=0.02,
+                bgcolor="rgba(255,255,255,0.85)",
+                bordercolor="rgba(0,0,0,0.1)",
+                borderwidth=1,
+                font=dict(size=10),
+            ),
         ),
     )
+
+    for t in traces:
+        xs = t["xs"]
+        ys = t["ys"]
+        school = t["school"]
+        color = t["color"]
+        fig.add_trace(
+            go.Scatter(
+                x=xs.tolist() if isinstance(xs, np.ndarray) else xs,
+                y=ys.tolist() if isinstance(ys, np.ndarray) else ys,
+                mode="markers",
+                name=school,
+                marker=dict(color=color, size=MARKER_SIZE),
+                hovertemplate=(
+                    f"<b>{school}</b><br>"
+                    "score: %{x}<br>cum%: %{y:.2f}<extra></extra>"
+                ),
+                showlegend=True,
+                cliponaxis=False,
+            )
+        )
+
     return fig
