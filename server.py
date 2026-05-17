@@ -1,39 +1,68 @@
-import json
+"""Flask blueprint — debug mode (single 'current' dataset).
+
+Endpoints:
+  GET  /                       — redirect to /view/current
+  GET  /view/<id>              — serve cumulative.html for a dataset
+  GET  /api/<id>/chart/<sid>   — serve per-subject JSON
+  GET  /api/<id>/build_version — version for client cache invalidation
+
+Run `python build.py [dataset_id]` first to populate output/datasets/<id>/.
+The default dataset_id is 'current', and / redirects there.
+
+Memory model: zero per request (sendfile). All builds are CLI-triggered.
+"""
 from pathlib import Path
 
-from flask import Blueprint, abort, jsonify, send_from_directory
+from flask import Blueprint, abort, jsonify, redirect, send_from_directory
 
-from config import CHART_DATA_PATH, OUTPUT_PATH
+from config import DATASETS_DIR
 
 bp = Blueprint("cumulative", __name__)
 
-
-def _load_chart_data() -> dict[int, dict]:
-    try:
-        with open(CHART_DATA_PATH, encoding="utf-8") as f:
-            return {p["id"]: p for p in json.load(f)}
-    except FileNotFoundError:
-        print(f"WARNING: {CHART_DATA_PATH} not found. Run build.py first.")
-        return {}
-
-
-_chart_data: dict[int, dict] = _load_chart_data()
-_html_dir = Path(OUTPUT_PATH).parent
-_html_name = Path(OUTPUT_PATH).name
+DEFAULT_DATASET = "current"
 
 
 @bp.get("/")
 def index():
-    resp = send_from_directory(_html_dir, _html_name)
+    return redirect(f"/view/{DEFAULT_DATASET}", code=302)
+
+
+@bp.get("/view/<id>")
+def view(id):
+    if not _is_safe_id(id):
+        abort(400)
+    path = DATASETS_DIR / id / "cumulative.html"
+    if not path.exists():
+        abort(404, f"Dataset '{id}' not built. Run: python build.py {id}")
+    resp = send_from_directory(DATASETS_DIR / id, "cumulative.html")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 
-@bp.get("/api/chart/<int:subject_id>")
-def get_chart(subject_id):
-    payload = _chart_data.get(subject_id)
-    if payload is None:
+@bp.get("/api/<id>/chart/<int:sid>")
+def chart(id, sid):
+    if not _is_safe_id(id):
+        abort(400)
+    path = DATASETS_DIR / id / "charts" / f"{sid}.json"
+    if not path.exists():
         abort(404)
-    resp = jsonify(payload)
+    resp = send_from_directory(DATASETS_DIR / id / "charts", f"{sid}.json")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+
+
+@bp.get("/api/<id>/build_version")
+def build_version(id):
+    if not _is_safe_id(id):
+        abort(400)
+    path = DATASETS_DIR / id / "build_version.txt"
+    if not path.exists():
+        abort(404)
+    version = path.read_text(encoding="utf-8").strip()
+    return jsonify({"version": version, "dataset_id": id})
+
+
+def _is_safe_id(id: str) -> bool:
+    if not id or len(id) > 80:
+        return False
+    return all(c.isalnum() or c in "-_" for c in id)

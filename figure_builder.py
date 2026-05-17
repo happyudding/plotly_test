@@ -64,6 +64,7 @@ def build_subject_figure(
 
     fig = go.Figure(
         layout=dict(
+            font=dict(family="Open Sans, verdana, arial, sans-serif", size=TITLE_FONT_SIZE),
             title=dict(
                 text=(
                     f"<span style='font-size:16px'><b>{name}</b></span>"
@@ -92,11 +93,8 @@ def build_subject_figure(
             ),
             yaxis=dict(
                 range=[0, 100],
-                fixedrange=True,
                 title="",
-                tickmode="array",
-                tickvals=[0, 20, 40, 60, 80, 100],
-                ticktext=["0%", "20%", "40%", "60%", "80%", "100%"],
+                ticksuffix="%",
                 ticks="outside",
                 tickcolor="#666",
                 ticklen=6,
@@ -104,9 +102,6 @@ def build_subject_figure(
                 gridcolor="#eee",
                 zeroline=False,
                 minor=dict(
-                    tickmode="linear",
-                    tick0=0,
-                    dtick=5,
                     ticks="outside",
                     ticklen=3,
                     tickcolor="#bbb",
