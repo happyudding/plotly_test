@@ -287,28 +287,10 @@ function clampYAxis(div) {
     Plotly.relayout(div, { 'yaxis.range': [a, b] });
   }
 }
-async function upgradeToFull(cell, div) {
-  if (cell.dataset.fullLoaded === '1' || cell.dataset.fullLoading === '1') return;
-  cell.dataset.fullLoading = '1';
-  try {
-    const resp = await fetch(`${API_BASE}/chart/${cell.dataset.id}?detail=full&_=${Date.now()}`, { cache: 'no-store' });
-    if (!resp.ok) throw new Error('http ' + resp.status);
-    const p = await resp.json();
-    applyHiddenToData(p.data);
-    await Plotly.react(div, p.data, p.layout, cfg);
-    cell.dataset.fullLoaded = '1';
-  } catch (err) {
-    console.error('full upgrade', cell.dataset.id, err);
-  } finally {
-    cell.dataset.fullLoading = '';
-  }
-}
-function attachLodUpgrade(cell, div) {
-  // LOD full-detail upgrade disabled (debug priority: first cell render)
+function attachZoomClamp(cell, div) {
   div.on('plotly_relayout', (ev) => {
     if (!isUserRelayout(ev)) return;
     clampYAxis(div);
-    // upgradeToFull(cell, div);  // disabled — server doesn't yet unwrap detail=full
   });
 }
 
@@ -387,10 +369,9 @@ async function upgradeToPlotly(cell) {
     if (!resp.ok) throw new Error('http ' + resp.status);
     const p = await resp.json();
     if (ctrl.signal.aborted) return;
-    // server response is wrapped: {id, name, low: {data, layout}, raw: {...}}
-    const figData = p.low && p.low.data;
-    const figLayout = p.low && p.low.layout;
-    if (!figData || !figLayout) throw new Error('payload missing .low.data/layout');
+    const figData = p.data;
+    const figLayout = p.layout;
+    if (!figData || !figLayout) throw new Error('payload missing .data/.layout');
     applyHiddenToData(figData);
 
     // newPlot goes through queue (CPU bound — yields between renders for paint)
@@ -404,7 +385,7 @@ async function upgradeToPlotly(cell) {
           cell.appendChild(div);
         }
         await Plotly.newPlot(div, figData, figLayout, cfg);
-        attachLodUpgrade(cell, div);
+        attachZoomClamp(cell, div);
         const thumb = cell.querySelector('.thumb');
         if (thumb) thumb.style.display = 'none';
         cell.dataset.plotlyLoaded = '1';
@@ -438,8 +419,6 @@ function destroyPlotly(cell) {
   const thumb = cell.querySelector('.thumb');
   if (thumb) thumb.style.display = '';
   cell.dataset.plotlyLoaded = '';
-  cell.dataset.fullLoaded = '';
-  cell.dataset.fullLoading = '';
   if (cell === activeCell) {
     cell.classList.remove('active');
     activeCell = null;

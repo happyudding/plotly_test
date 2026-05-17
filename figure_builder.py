@@ -122,7 +122,7 @@ def build_subject_figure(
         school = t["school"]
         color = t["color"]
         fig.add_trace(
-            go.Scatter(
+            go.Scattergl(
                 x=xs.tolist() if isinstance(xs, np.ndarray) else xs,
                 y=ys.tolist() if isinstance(ys, np.ndarray) else ys,
                 mode="markers",
@@ -133,7 +133,6 @@ def build_subject_figure(
                     "score: %{x}<br>cum%: %{y:.2f}<extra></extra>"
                 ),
                 showlegend=True,
-                cliponaxis=False,
             )
         )
 

@@ -15,7 +15,7 @@ import page_builder
 from chart_payload import build_payload
 from config import DATASETS_DIR
 from data_loader import load_table
-from preprocess import cumulative_distribution_full, downsample_cdf, to_numeric_clean
+from preprocess import cumulative_distribution_full, to_numeric_clean
 
 COLOR_PALETTE = pcolors.qualitative.Plotly
 
@@ -77,26 +77,18 @@ def build_dataset(
     first = schools[school_names[0]]
     n_subjects = len(first.subjects)
 
-    # 3) Build per-subject sharded JSON files
+    # 3) Build per-subject sharded JSON files (full-resolution, no LOD)
     for idx in range(n_subjects):
-        full_traces = []
-        low_traces = []
+        traces = []
         for name in school_names:
             data = schools[name]
             values = to_numeric_clean(data.scores.iloc[:, idx])
-            xs_full, ys_full = cumulative_distribution_full(values)
-            xs_low, ys_low = downsample_cdf(xs_full, ys_full)
-            full_traces.append({
+            xs, ys = cumulative_distribution_full(values)
+            traces.append({
                 "school": name,
                 "color": color_map[name],
-                "xs": xs_full,
-                "ys": ys_full,
-            })
-            low_traces.append({
-                "school": name,
-                "color": color_map[name],
-                "xs": xs_low,
-                "ys": ys_low,
+                "xs": xs,
+                "ys": ys,
             })
 
         payload = build_payload(
@@ -105,8 +97,7 @@ def build_dataset(
             first.units[idx] if idx < len(first.units) else "",
             first.lo_limits[idx] if idx < len(first.lo_limits) else None,
             first.hi_limits[idx] if idx < len(first.hi_limits) else None,
-            low_traces,
-            full_traces,
+            traces,
         )
         (charts_dir / f"{idx}.json").write_text(json.dumps(payload), encoding="utf-8")
 
