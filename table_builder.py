@@ -39,6 +39,10 @@ def _fmt_num(value, digits=6):
     return round(float(value), digits)
 
 
+def _fmt_metric(value):
+    return _fmt_num(value, digits=3)
+
+
 def _write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, **JSON_KWARGS), encoding="utf-8")
@@ -79,44 +83,67 @@ def _fail_mask_for_table(table):
     return mask
 
 
-def _main_fail_subjects_by_type(schools):
-    by_type = {}
+def _type_sort_key(value):
+    text = str(value)
+    try:
+        return (0, float(text))
+    except ValueError:
+        return (1, text)
+
+
+def _subject_rankings_by_type(schools):
+    rankings = {}
+    type_totals = {}
+    first = next(iter(schools.values()))
+    subject_names = _subject_columns(first)
     for _source_name, table in schools.items():
-        mask = _fail_mask_for_table(table)
+        fail_mask = _fail_mask_for_table(table)
         student_types = table.meta["student_type"].map(_fmt_type)
-        for student_type in sorted(student_types.unique()):
-            if student_type == PASS_STUDENT_TYPE:
-                continue
+        for student_type in sorted(student_types.unique(), key=_type_sort_key):
             rows = student_types == student_type
-            counts = mask.loc[rows].sum(axis=0)
-            if counts.empty or int(counts.max()) <= 0:
+            row_count = int(rows.sum())
+            type_totals[student_type] = type_totals.get(student_type, 0) + row_count
+            if student_type == PASS_STUDENT_TYPE or row_count == 0:
                 continue
-            sid = int(counts.idxmax())
-            item = {
-                "subject_id": sid,
-                "subject": table.subjects[sid],
-                "fail_count": int(counts.max()),
-            }
-            current = by_type.get(student_type)
-            if current is None or item["fail_count"] > current["fail_count"]:
-                by_type[student_type] = item
-    return by_type
+            counts = fail_mask.loc[rows].sum(axis=0)
+            bucket = rankings.setdefault(student_type, {})
+            for sid, count in counts.items():
+                if int(count) <= 0:
+                    continue
+                subject_id = int(sid)
+                item = bucket.setdefault(subject_id, {
+                    "subject_id": subject_id,
+                    "subject": subject_names[subject_id],
+                    "count": 0,
+                    "portion (%)": 0.0,
+                })
+                item["count"] += int(count)
+    for student_type, bucket in rankings.items():
+        total = type_totals.get(student_type, 0)
+        subjects = []
+        for item in bucket.values():
+            item["portion (%)"] = round(item["count"] / total * 100.0, 3) if total else 0.0
+            subjects.append(item)
+        subjects.sort(key=lambda x: (-x["portion (%)"], -x["count"], x["subject"]))
+        rankings[student_type] = subjects
+    return rankings
 
 
 def _build_yield(schools):
     combined = _combined_frames(schools)
     total = len(combined)
-    main_fail = _main_fail_subjects_by_type(schools)
+    subject_rankings = _subject_rankings_by_type(schools)
     rows = []
     if total == 0:
         return rows
     counts = combined["student_type"].map(_fmt_type).value_counts(dropna=False)
-    for student_type, count in counts.sort_index(key=lambda s: s.map(lambda x: float(x) if str(x).replace(".", "", 1).isdigit() else float("inf"))).items():
+    for student_type, count in counts.sort_index(key=lambda s: s.map(_type_sort_key)).items():
+        fail_subjects = subject_rankings.get(student_type, [])
         rows.append({
             "student_type": student_type,
             "count": int(count),
             "portion (%)": round(int(count) / total * 100.0, 3),
-            "Main Fail subject": "Pass" if student_type == PASS_STUDENT_TYPE else main_fail.get(student_type, {}).get("subject", "N/A"),
+            "Main Fail subject": "Pass" if student_type == PASS_STUDENT_TYPE else (fail_subjects[0]["subject"] if fail_subjects else "N/A"),
         })
     return rows
 
@@ -153,56 +180,28 @@ def _build_cpk(schools):
             "min": _fmt_num(series.min() if len(series) else None),
             "max": _fmt_num(series.max() if len(series) else None),
             "average": _fmt_num(avg),
-            "stdev": _fmt_num(stdev),
-            "cp": _fmt_num(cp),
-            "cpl": _fmt_num(cpl),
-            "cpu": _fmt_num(cpu),
-            "cpk": _fmt_num(cpk),
+            "stdev": _fmt_metric(stdev),
+            "cp": _fmt_metric(cp),
+            "cpl": _fmt_metric(cpl),
+            "cpu": _fmt_metric(cpu),
+            "cpk": _fmt_metric(cpk),
         })
     return rows
 
 
 def _build_fail_items(schools):
-    total_rows = sum(len(t.meta) for t in schools.values())
-    summary = {}
-    records = []
-    for source_name, table in schools.items():
-        mask = _fail_mask_for_table(table)
-        student_types = table.meta["student_type"].map(_fmt_type)
-        for sid, subject in enumerate(table.subjects):
-            fail_rows = mask.iloc[:, sid]
-            fail_count = int(fail_rows.sum())
-            if fail_count > 0:
-                current = summary.setdefault(sid, {
-                    "subject_id": sid,
-                    "subject": subject,
-                    "fail_count": 0,
-                    "fail_portion (%)": 0.0,
-                    "student_types": {},
-                })
-                current["fail_count"] += fail_count
-                type_counts = student_types[fail_rows].value_counts()
-                for student_type, count in type_counts.items():
-                    current["student_types"][student_type] = current["student_types"].get(student_type, 0) + int(count)
-        fail_any = mask.any(axis=1)
-        for ridx in list(mask.index[fail_any]):
-            failed_subject_ids = [int(sid) for sid, failed in mask.loc[ridx].items() if bool(failed)]
-            failed_subjects = [table.subjects[sid] for sid in failed_subject_ids]
-            row = {
-                "source_file": source_name,
-                **{col: _json_safe(table.meta.iloc[ridx][col]) for col in META_COLUMNS},
-                "student_type": student_types.iloc[ridx],
-                "fail_count": len(failed_subjects),
-                "fail_subjects": ", ".join(failed_subjects),
-            }
-            records.append(row)
-    summaries = []
-    for item in summary.values():
-        item["fail_portion (%)"] = round(item["fail_count"] / total_rows * 100.0, 3) if total_rows else 0.0
-        item["student_types"] = ", ".join(f"{k}:{v}" for k, v in sorted(item["student_types"].items()))
-        summaries.append(item)
-    summaries.sort(key=lambda x: (-x["fail_portion (%)"], -x["fail_count"], x["subject"]))
-    return {"summary": summaries, "records": records}
+    yield_rows = _build_yield(schools)
+    subject_rankings = _subject_rankings_by_type(schools)
+    rows = []
+    for row in yield_rows:
+        student_type = row["student_type"]
+        fail_subjects = [] if student_type == PASS_STUDENT_TYPE else subject_rankings.get(student_type, [])
+        rows.append({
+            **row,
+            "Fail Subjects": "Pass" if student_type == PASS_STUDENT_TYPE else ("N/A" if not fail_subjects else f"{len(fail_subjects)} subjects"),
+            "fail_subjects": fail_subjects,
+        })
+    return {"rows": rows}
 
 
 def build_table_artifacts(dataset_id, schools):
@@ -233,12 +232,14 @@ def build_table_artifacts(dataset_id, schools):
     return {"tables_dir": str(tables_dir), "row_count": meta["row_count"]}
 
 
-def load_raw_page(dataset_id, page_current=0, page_size=25, sort_by=None, filter_query=""):
+def load_raw_page(dataset_id, page_current=0, page_size=25, sort_by=None, filter_query="", source_file=None):
     input_dir = DATASETS_DIR / dataset_id / "input"
     from data_loader import load_table
 
     schools = {p.stem: load_table(p) for p in sorted(input_dir.glob("*.csv"))}
     df = _combined_frames(schools)
+    if source_file and source_file != "__all__":
+        df = df[df["source_file"].astype(str) == str(source_file)]
     df = _apply_filter(df, filter_query or "")
     if sort_by:
         for sort in reversed(sort_by):
@@ -277,4 +278,3 @@ def read_table_json(dataset_id, name):
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
-
