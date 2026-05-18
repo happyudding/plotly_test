@@ -1,14 +1,32 @@
 import sys
+from pathlib import Path
 
-from config import INPUT_DIR, SCHOOL_FILES_GLOB
 from dataset_builder import build_dataset
+
+
+# 빌드에 사용할 입력 CSV 절대경로 리스트.
+# 수시로 다른 데이터로 빌드하려면 이 리스트만 수정.
+INPUT_PATHS = [
+    r"F:\COINAPI\plotly\data\a_school_updated_call.csv",
+    r"F:\COINAPI\plotly\data\b_school_updated_call.csv",
+    r"F:\COINAPI\plotly\data\c_school_updated_call.csv",
+]
+
+# INPUT_PATHS = [
+#     r"F:\COINAPI\plotly\data\a_school.csv",
+#     r"F:\COINAPI\plotly\data\b_school.csv",
+#     r"F:\COINAPI\plotly\data\c_school.csv",
+# ]
 
 
 def main():
     dataset_id = sys.argv[1] if len(sys.argv) > 1 else "current"
-    paths = sorted(INPUT_DIR.glob(SCHOOL_FILES_GLOB))
-    if not paths:
-        raise SystemExit(f"No files matching {SCHOOL_FILES_GLOB!r} in {INPUT_DIR}")
+
+    paths = [Path(p) for p in INPUT_PATHS]
+    missing = [str(p) for p in paths if not p.is_file()]
+    if missing:
+        raise SystemExit("File(s) not found:\n  - " + "\n  - ".join(missing))
+
     inputs = {p.name: p for p in paths}
     print(f"Building dataset '{dataset_id}' from {len(inputs)} files:")
     for name in inputs:

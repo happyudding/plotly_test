@@ -18,7 +18,9 @@ JSON_KWARGS = {"ensure_ascii": False, "separators": (",", ":")}
 
 
 def _save_upload(src, dest):
-    if hasattr(src, "save"):
+    if isinstance(src, (bytes, bytearray)):
+        dest.write_bytes(bytes(src))
+    elif hasattr(src, "save"):
         src.save(str(dest))
     else:
         dest.write_bytes(Path(src).read_bytes())
@@ -52,7 +54,7 @@ def _progress(label, current, total, start):
     )
 
 
-def build_dataset(dataset_id, inputs):
+def build_dataset(dataset_id, inputs, progress_cb=None):
     t0 = time.perf_counter()
     timings = {}
     out_dir = DATASETS_DIR / dataset_id
@@ -60,6 +62,16 @@ def build_dataset(dataset_id, inputs):
     for d in (out_dir, input_dir, charts_dir, thumbs_dir):
         d.mkdir(parents=True, exist_ok=True)
 
+    def emit(stage, current=0, total=0, **extra):
+        if progress_cb:
+            progress_cb({
+                "dataset_id": dataset_id, "stage": stage,
+                "current": current, "total": total,
+                "elapsed_s": round(time.perf_counter() - t0, 2),
+                **extra,
+            })
+
+    emit("save_inputs", 0, len(inputs))
     _log(f"start dataset={dataset_id}")
     _log("saving input CSV files")
     save_t0 = time.perf_counter()
@@ -71,16 +83,19 @@ def build_dataset(dataset_id, inputs):
         dest = input_dir / name
         _save_upload(src, dest)
         saved.append(dest)
+        emit("save_inputs", len(saved), len(inputs))
     if not saved:
         raise ValueError("No valid CSV uploads received (need .csv extension)")
     timings["save_inputs_s"] = _elapsed_since(save_t0)
     _log(f"saved {len(saved)} CSV files in {timings['save_inputs_s']}s")
 
+    emit("load_csv", 0, len(saved))
     _log("loading CSV files")
     load_t0 = time.perf_counter()
     schools = {p.stem: load_table(p) for p in sorted(saved)}
     timings["load_csv_s"] = _elapsed_since(load_t0)
     _log(f"loaded {len(schools)} schools in {timings['load_csv_s']}s")
+    emit("load_csv", len(schools), len(saved))
     names = list(schools.keys())
     color_map = {n: COLOR_PALETTE[i % len(COLOR_PALETTE)] for i, n in enumerate(names)}
     first = schools[names[0]]
@@ -95,6 +110,7 @@ def build_dataset(dataset_id, inputs):
     svg_bytes = 0
     progress_t0 = time.perf_counter()
     _log(f"building JSON and SVG charts for {n_subjects} subjects")
+    emit("cdf_svg", 0, n_subjects)
     for idx in range(n_subjects):
         traces = []
         for name in names:
@@ -125,6 +141,7 @@ def build_dataset(dataset_id, inputs):
         svg_bytes += (thumbs_dir / f"{idx}.svg").stat().st_size
         if (idx + 1) % 10 == 0 or idx + 1 == n_subjects:
             _progress("charts+svg", idx + 1, n_subjects, progress_t0)
+            emit("cdf_svg", idx + 1, n_subjects)
     timings["cdf_s"] = round(cdf_s, 2)
     timings["payload_s"] = round(payload_s, 2)
     timings["write_json_s"] = round(write_s, 2)
@@ -133,6 +150,7 @@ def build_dataset(dataset_id, inputs):
     _log(f"chart JSON size: {chart_bytes / 1024 / 1024:.2f} MB")
     _log(f"SVG thumb size: {svg_bytes / 1024 / 1024:.2f} MB")
 
+    emit("write_page", 0, 1)
     _log("writing HTML and build version")
     page_t0 = time.perf_counter()
     build_version = str(int(time.time()))
@@ -145,6 +163,7 @@ def build_dataset(dataset_id, inputs):
     elapsed_s = round(time.perf_counter() - t0, 2)
     timings["total_s"] = elapsed_s
     _log(f"done in {elapsed_s}s")
+    emit("done", n_subjects, n_subjects, n_schools=len(names))
     return {
         "dataset_id": dataset_id, "build_version": build_version,
         "n_subjects": n_subjects, "n_schools": len(names), "schools": names,

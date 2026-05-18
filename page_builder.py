@@ -30,6 +30,18 @@ HTML_TEMPLATE = """<!doctype html>
   window.__updateBoot = __updateBoot;
   document.addEventListener('DOMContentLoaded', () => { window.__BOOT_STAGE = 'head:DOMContentLoaded'; __updateBoot(); });
   setInterval(__updateBoot, 500);
+
+  // thumb img load retry — fails로 인한 빈 박스 방지
+  window.__retryThumb = function(img) {
+    const tries = parseInt(img.dataset.retry || '0', 10);
+    if (tries >= 2) {
+      img.closest('.cell').classList.remove('loaded');
+      return;
+    }
+    img.dataset.retry = String(tries + 1);
+    const base = img.src.split('#')[0];
+    setTimeout(() => { img.src = base + '#r' + tries; }, 400 * (tries + 1));
+  };
 </script>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer onload="window.__BOOT_STAGE='head:plotly-loaded';window.__updateBoot&&window.__updateBoot();" onerror="window.__BOOT_ERRORS.push('Plotly CDN load FAILED');window.__updateBoot&&window.__updateBoot();"></script>
 <style>
@@ -63,7 +75,7 @@ HTML_TEMPLATE = """<!doctype html>
   .cell.loaded::before { display: none; }
   .cell .thumb { width: 100%; height: 100%; }
   .cell .thumb img, .cell .thumb svg { width: 100%; height: 100%; display: block; }
-  .cell .plot { width: 100%; height: 100%; position: absolute; inset: 0; background: #fff; }
+  .cell .plot { width: 100%; height: 100%; position: absolute; inset: 0; }
   .cell.active { border-color: #4a90e2; box-shadow: 0 0 0 2px rgba(74,144,226,0.25); }
   .cell.flash { animation: cell-flash 1.5s ease-out; }
   @keyframes cell-flash {
@@ -295,10 +307,9 @@ async function upgradeToPlotly(cell) {
           setTimeout(() => { const el = document.getElementById('boot-status'); if (el) el.classList.add('done'); }, 2000);
         }
         attachZoomClamp(cell, div);
-        const thumb = cell.querySelector('.thumb');
-        if (thumb) thumb.style.display = 'none';
         cell.dataset.plotlyLoaded = '1';
         cell.classList.add('loaded');
+        trackActivePlotly(cell);
         _perf.cellsRendered++;
         resolveOuter();
       });
@@ -311,13 +322,24 @@ async function upgradeToPlotly(cell) {
   }
 }
 
+const _activePlotly = [];
+const MAX_ACTIVE_PLOTLY = 8;
+function trackActivePlotly(cell) {
+  const idx = _activePlotly.indexOf(cell);
+  if (idx >= 0) _activePlotly.splice(idx, 1);
+  _activePlotly.push(cell);
+  while (_activePlotly.length > MAX_ACTIVE_PLOTLY) {
+    const oldest = _activePlotly.shift();
+    if (oldest !== cell && oldest.dataset.plotlyLoaded === '1') destroyPlotly(oldest);
+  }
+}
+
 function destroyPlotly(cell) {
   const div = cell.querySelector('.plot');
   if (div) { try { Plotly.purge(div); } catch (_) {} div.remove(); }
-  const thumb = cell.querySelector('.thumb');
-  if (thumb) thumb.style.display = '';
-  cell.classList.add('loaded');
   cell.dataset.plotlyLoaded = '';
+  const idx = _activePlotly.indexOf(cell);
+  if (idx >= 0) _activePlotly.splice(idx, 1);
   if (cell === activeCell) { cell.classList.remove('active'); activeCell = null; updateActiveLabel(); }
 }
 
@@ -336,12 +358,11 @@ function scheduleDestroyPlotly(cell) {
     const ctrl = plotlyInflight.get(cell);
     if (ctrl) ctrl.abort();
     destroyPlotly(cell);
-  }, 4500);
+  }, 2000);
   plotlyDestroyTimers.set(cell, timer);
 }
 
 async function loadCell(cell) {
-  cell.classList.add('loaded');
   applyHiddenToThumb(cell);
 }
 
@@ -367,7 +388,7 @@ waitForPlotly().then(() => {
         scheduleDestroyPlotly(cell);
       }
     }
-  }, { rootMargin: '1200px 0px', threshold: 0 });
+  }, { rootMargin: '2400px 0px', threshold: 0 });
   document.querySelectorAll('.cell').forEach((el) => observer.observe(el));
 
   window.__BOOT_STAGE = 'body:observers-attached';
@@ -525,7 +546,7 @@ def write_html(out_path, subjects, schools, dataset_id="default", build_version=
         f'    <div class="cell loaded" data-id="{i}" data-name="{_esc(n)}">'
         f'<div class="thumb"><img src="/api/{_esc(dataset_id)}/thumb/{i}?v={_esc(build_version)}" '
         f'alt="{_esc(n)}" loading="{_thumb_loading(i)}" decoding="async" '
-        f'onerror="this.closest(\'.cell\').classList.remove(\'loaded\')"></div></div>'
+        f'onerror="window.__retryThumb&amp;&amp;window.__retryThumb(this)"></div></div>'
         for i, n in enumerate(subjects)
     )
     items = "\n".join(
