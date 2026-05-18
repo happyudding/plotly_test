@@ -8,6 +8,7 @@ from werkzeug.utils import secure_filename
 
 import dataset_builder
 from config import DATASETS_DIR
+from dash_dashboard import send_fail_png
 
 bp = Blueprint("cumulative", __name__)
 DEFAULT_DATASET = "current"
@@ -99,6 +100,13 @@ def thumb(id, sid):
     return resp
 
 
+@bp.get("/api/<id>/fail_png/<int:sid>")
+def fail_png(id, sid):
+    if not _safe(id):
+        abort(400)
+    return send_fail_png(id, sid)
+
+
 @bp.get("/api/<id>/build_version")
 def build_version(id):
     if not _safe(id):
@@ -145,10 +153,11 @@ def _placeholder_html(dataset_id):
 const ID = {dataset_id!r};
 const STAGES = {{
   queued: "대기 중",
-  save_inputs: "1/4 CSV 저장",
-  load_csv: "2/4 CSV 파싱",
-  cdf_svg: "3/4 CDF 계산 + SVG 생성",
-  write_page: "4/4 HTML 생성",
+  save_inputs: "1/5 CSV 저장",
+  load_csv: "2/5 CSV 파싱",
+  table_json: "3/5 테이블 JSON 생성",
+  cdf_svg: "4/5 CDF 계산 + SVG 생성",
+  write_page: "5/5 HTML 생성",
   done: "완료",
   error: "에러",
 }};

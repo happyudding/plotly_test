@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import page_builder
+import table_builder
 from chart_payload import build_payload
 from config import DATASETS_DIR
 from data_loader import load_table
@@ -101,6 +102,14 @@ def build_dataset(dataset_id, inputs, progress_cb=None):
     first = schools[names[0]]
     n_subjects = len(first.subjects)
 
+    emit("table_json", 0, 1)
+    _log("building table JSON artifacts")
+    table_t0 = time.perf_counter()
+    table_result = table_builder.build_table_artifacts(dataset_id, schools)
+    timings["table_json_s"] = _elapsed_since(table_t0)
+    _log(f"table JSON done in {timings['table_json_s']}s, raw rows={table_result['row_count']}")
+    emit("table_json", 1, 1)
+
     cdf_s = 0.0
     payload_s = 0.0
     write_s = 0.0
@@ -169,4 +178,5 @@ def build_dataset(dataset_id, inputs, progress_cb=None):
         "n_subjects": n_subjects, "n_schools": len(names), "schools": names,
         "elapsed_s": elapsed_s, "timings": timings,
         "chart_bytes": chart_bytes, "svg_bytes": svg_bytes,
+        "raw_rows": table_result["row_count"],
     }

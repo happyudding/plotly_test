@@ -41,6 +41,7 @@ def main():
     if "chart_bytes" in r and "svg_bytes" in r:
         print(f"Sizes: charts={r['chart_bytes'] / 1024 / 1024:.2f} MB, thumbs={r['svg_bytes'] / 1024 / 1024:.2f} MB")
     print(f"View at: http://127.0.0.1:8000/view/{dataset_id}")
+    print(f"Dash at: http://127.0.0.1:8000/dash/{dataset_id}")
 
 
 if __name__ == "__main__":

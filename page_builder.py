@@ -61,6 +61,8 @@ HTML_TEMPLATE = """<!doctype html>
   .topbar input#search-input { padding: 5px 10px; font-size: 13px; min-width: 220px; border: 1px solid #ccc; border-radius: 4px; outline: none; transition: border-color 0.15s ease, background 0.15s ease; }
   .topbar input#search-input:focus { border-color: #4a90e2; }
   .topbar input#search-input.no-match { border-color: #e57373; background: #fff5f5; }
+  .topbar .dash-link { color: #2369b3; text-decoration: none; font-size: 12px; border: 1px solid #c7d8ea; padding: 5px 8px; border-radius: 4px; background: #f7fbff; }
+  .topbar .dash-link:hover { background: #eef6ff; }
   .content { padding: 16px 156px 16px 16px; }
   .sidebar { position: fixed; right: 0; top: 48px; bottom: 0; width: 140px; background: #fff; border-left: 1px solid #ddd; padding: 12px 10px; overflow-y: auto; z-index: 80; box-sizing: border-box; }
   .sidebar-title { font-size: 11px; color: #666; margin: 0 0 8px 2px; font-weight: 600; }
@@ -98,6 +100,7 @@ HTML_TEMPLATE = """<!doctype html>
 <div class="topbar">
   <h1>Cumulative Distribution (n=__N__)</h1>
   <span class="dataset">dataset: __DATASET_ID__</span>
+  <a class="dash-link" href="/dash/__DATASET_ID__">Data Dashboard</a>
   <input id="search-input" type="text" placeholder="검색 (Enter: 해당 차트로 이동)" autocomplete="off">
   <button id="btn-add-note" type="button" title="메모 추가" style="padding:5px 10px;cursor:pointer;background:#fff8c5;border:1px solid #d4a72c;border-radius:4px;font-size:13px;">+ 메모</button>
   <span class="active-label">활성: <strong id="active-name">셀에 마우스를 올리세요</strong></span>
