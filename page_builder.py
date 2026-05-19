@@ -100,7 +100,6 @@ HTML_TEMPLATE = """<!doctype html>
 <div class="topbar">
   <h1>Cumulative Distribution (n=__N__)</h1>
   <span class="dataset">dataset: __DATASET_ID__</span>
-  <a class="dash-link" href="/dash/__DATASET_ID__">Data Dashboard</a>
   <input id="search-input" type="text" placeholder="검색 (Enter: 해당 차트로 이동)" autocomplete="off">
   <button id="btn-add-note" type="button" title="메모 추가" style="padding:5px 10px;cursor:pointer;background:#fff8c5;border:1px solid #d4a72c;border-radius:4px;font-size:13px;">+ 메모</button>
   <span class="active-label">활성: <strong id="active-name">셀에 마우스를 올리세요</strong></span>

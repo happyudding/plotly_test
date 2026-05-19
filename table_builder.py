@@ -1,5 +1,6 @@
 import json
 import math
+from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
@@ -142,49 +143,70 @@ def _build_yield(schools):
         rows.append({
             "student_type": student_type,
             "count": int(count),
-            "portion (%)": round(int(count) / total * 100.0, 3),
+            "portion (%)": round(int(count) / total * 100.0, 2),
             "Main Fail subject": "Pass" if student_type == PASS_STUDENT_TYPE else (fail_subjects[0]["subject"] if fail_subjects else "N/A"),
+            "comment": "",
         })
     return rows
+
+
+def _calc_stats(series, lo, hi):
+    series = series.dropna() if series is not None else pd.Series(dtype=float)
+    n = len(series)
+    stdev = series.std(ddof=1) if n > 1 else float("nan")
+    avg = series.mean() if n else float("nan")
+    can_calc = (
+        n > 1 and stdev and not pd.isna(stdev) and stdev != 0
+        and lo is not None and hi is not None and not pd.isna(lo) and not pd.isna(hi)
+    )
+    if can_calc:
+        cp = (float(hi) - float(lo)) / (6.0 * stdev)
+        cpl = (avg - float(lo)) / (3.0 * stdev)
+        cpu = (float(hi) - avg) / (3.0 * stdev)
+        cpk = min(cpl, cpu)
+    else:
+        cp = cpl = cpu = cpk = None
+    return {
+        "n": n,
+        "min": _fmt_num(series.min() if n else None),
+        "median": _fmt_num(series.median() if n else None),
+        "max": _fmt_num(series.max() if n else None),
+        "average": _fmt_num(avg),
+        "stdev": _fmt_metric(stdev),
+        "cp": _fmt_metric(cp),
+        "cpl": _fmt_metric(cpl),
+        "cpu": _fmt_metric(cpu),
+        "cpk": _fmt_metric(cpk),
+    }
 
 
 def _build_cpk(schools):
     rows = []
     first = next(iter(schools.values()))
     for idx, subject in enumerate(first.subjects):
-        values = []
-        for table in schools.values():
-            values.append(pd.to_numeric(table.scores.iloc[:, idx], errors="coerce"))
-        series = pd.concat(values, ignore_index=True).dropna()
         lo = first.lo_limits[idx] if idx < len(first.lo_limits) else None
         hi = first.hi_limits[idx] if idx < len(first.hi_limits) else None
-        stdev = series.std(ddof=1) if len(series) > 1 else float("nan")
-        avg = series.mean() if len(series) else float("nan")
-        can_calc = (
-            len(series) > 1 and stdev and not pd.isna(stdev) and stdev != 0
-            and lo is not None and hi is not None and not pd.isna(lo) and not pd.isna(hi)
-        )
-        if can_calc:
-            cp = (float(hi) - float(lo)) / (6.0 * stdev)
-            cpl = (avg - float(lo)) / (3.0 * stdev)
-            cpu = (float(hi) - avg) / (3.0 * stdev)
-            cpk = min(cpl, cpu)
-        else:
-            cp = cpl = cpu = cpk = None
+        unit = first.units[idx] if idx < len(first.units) else ""
+        per_source = []
+        for source_name, table in schools.items():
+            series = pd.to_numeric(table.scores.iloc[:, idx], errors="coerce")
+            per_source.append(series)
+            rows.append({
+                "subject": subject,
+                "source": source_name,
+                "unit": unit,
+                "lo_limit": _fmt_num(lo),
+                "hi_limit": _fmt_num(hi),
+                **_calc_stats(series, lo, hi),
+            })
+        total_series = pd.concat(per_source, ignore_index=True) if per_source else pd.Series(dtype=float)
         rows.append({
-            "subject_id": idx,
             "subject": subject,
-            "unit": first.units[idx] if idx < len(first.units) else "",
+            "source": "total",
+            "unit": unit,
             "lo_limit": _fmt_num(lo),
             "hi_limit": _fmt_num(hi),
-            "min": _fmt_num(series.min() if len(series) else None),
-            "max": _fmt_num(series.max() if len(series) else None),
-            "average": _fmt_num(avg),
-            "stdev": _fmt_metric(stdev),
-            "cp": _fmt_metric(cp),
-            "cpl": _fmt_metric(cpl),
-            "cpu": _fmt_metric(cpu),
-            "cpk": _fmt_metric(cpk),
+            **_calc_stats(total_series, lo, hi),
         })
     return rows
 
@@ -278,3 +300,37 @@ def read_table_json(dataset_id, name):
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def build_raw_xlsx(dataset_id):
+    from data_loader import load_table
+
+    input_dir = DATASETS_DIR / dataset_id / "input"
+    if not input_dir.exists():
+        raise FileNotFoundError(f"input directory missing for dataset {dataset_id}")
+
+    schools = {p.stem: load_table(p) for p in sorted(input_dir.glob("*.csv"))}
+    if not schools:
+        raise FileNotFoundError(f"no input csv files for dataset {dataset_id}")
+
+    buf = BytesIO()
+    used_names = set()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        for source_name, table in schools.items():
+            meta = table.meta.reset_index(drop=True).copy()
+            scores = table.scores.reset_index(drop=True).copy()
+            scores.columns = _subject_columns(table)
+            frame = pd.concat([meta, scores], axis=1)
+            frame["student_type"] = frame["student_type"].map(_fmt_type)
+
+            sheet = source_name[:31] or "sheet"
+            base = sheet
+            i = 1
+            while sheet in used_names:
+                suffix = f"_{i}"
+                sheet = (base[: 31 - len(suffix)] + suffix)
+                i += 1
+            used_names.add(sheet)
+            frame.to_excel(writer, sheet_name=sheet, index=False)
+    buf.seek(0)
+    return buf.getvalue()

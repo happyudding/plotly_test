@@ -1,14 +1,17 @@
+import json
 import secrets
 import threading
 import time
+from io import BytesIO
 from pathlib import Path
 
-from flask import Blueprint, abort, jsonify, redirect, request, send_from_directory
+from flask import Blueprint, abort, jsonify, redirect, request, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 
 import dataset_builder
 from config import DATASETS_DIR
 from dash_dashboard import send_fail_png
+from table_builder import build_raw_xlsx
 
 bp = Blueprint("cumulative", __name__)
 DEFAULT_DATASET = "current"
@@ -105,6 +108,53 @@ def fail_png(id, sid):
     if not _safe(id):
         abort(400)
     return send_fail_png(id, sid)
+
+
+@bp.get("/api/<id>/raw_xlsx")
+def raw_xlsx(id):
+    if not _safe(id):
+        abort(400)
+    if not (DATASETS_DIR / id / "input").exists():
+        abort(404)
+    try:
+        data = build_raw_xlsx(id)
+    except FileNotFoundError:
+        abort(404)
+    resp = send_file(
+        BytesIO(data),
+        as_attachment=True,
+        download_name=f"{id}_raw.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@bp.get("/api/<id>/yield_comments")
+def yield_comments_get(id):
+    if not _safe(id):
+        abort(400)
+    path = DATASETS_DIR / id / "tables" / "yield_comments.json"
+    if not path.exists():
+        return jsonify({})
+    try:
+        return jsonify(json.loads(path.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, OSError):
+        return jsonify({})
+
+
+@bp.post("/api/<id>/yield_comments")
+def yield_comments_post(id):
+    if not _safe(id):
+        abort(400)
+    payload = request.get_json(force=True, silent=True) or {}
+    if not isinstance(payload, dict):
+        abort(400, "payload must be a dict")
+    safe_payload = {str(k): str(v) for k, v in payload.items() if v not in (None, "")}
+    path = DATASETS_DIR / id / "tables" / "yield_comments.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(safe_payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    return jsonify({"ok": True, "count": len(safe_payload)})
 
 
 @bp.get("/api/<id>/build_version")

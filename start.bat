@@ -8,6 +8,11 @@ set "DATASET=current"
 
 call "%ROOT%terminate.bat"
 
+if exist "%ROOT%output\datasets\%DATASET%" (
+    echo Cleaning previous dataset folder: %DATASET%
+    rmdir /s /q "%ROOT%output\datasets\%DATASET%"
+)
+
 echo.
 echo === Building dataset '%DATASET%' (INPUT_PATHS in build.py) ===
 "%PYTHON%" "%ROOT%build.py" %DATASET%
