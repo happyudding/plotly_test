@@ -137,13 +137,31 @@ def _build_yield(schools):
     rows = []
     if total == 0:
         return rows
+    sources = list(schools.keys())
+    per_file_total = {}
+    per_file_type_count = {}
+    for source_name, table in schools.items():
+        types = table.meta["student_type"].map(_fmt_type)
+        per_file_total[source_name] = len(types)
+        per_file_type_count[source_name] = types.value_counts(dropna=False).to_dict()
     counts = combined["student_type"].map(_fmt_type).value_counts(dropna=False)
     for student_type, count in counts.sort_index(key=lambda s: s.map(_type_sort_key)).items():
         fail_subjects = subject_rankings.get(student_type, [])
+        portion_fields = {}
+        portions = []
+        for src in sources:
+            file_total = per_file_total.get(src, 0)
+            file_count = int(per_file_type_count.get(src, {}).get(student_type, 0))
+            portion = round(file_count / file_total * 100.0, 2) if file_total else 0.0
+            portion_fields[f"portion_{src}"] = portion
+            portions.append(portion)
+        avg_portion = round(sum(portions) / len(portions), 2) if portions else 0.0
         rows.append({
             "student_type": student_type,
             "count": int(count),
             "portion (%)": round(int(count) / total * 100.0, 2),
+            **portion_fields,
+            "avg": avg_portion,
             "Main Fail subject": "Pass" if student_type == PASS_STUDENT_TYPE else (fail_subjects[0]["subject"] if fail_subjects else "N/A"),
             "comment": "",
         })

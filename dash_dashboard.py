@@ -74,21 +74,24 @@ def _table(dash_table, table_id, rows=None, page_size=PAGE_SIZE, columns=None, *
     )
 
 
-def _yield_columns():
-    return [
+def _yield_columns(sources):
+    cols = [
         {"name": "student_type", "id": "student_type"},
-        {"name": "count", "id": "count"},
-        {"name": "portion (%)", "id": "portion (%)"},
-        {"name": "Main Fail subject", "id": "Main Fail subject"},
-        {"name": "comment", "id": "comment", "editable": True},
+        {"name": "count", "id": "count", "type": "numeric"},
     ]
+    for src in sources or []:
+        cols.append({"name": str(src), "id": f"portion_{src}", "type": "numeric"})
+    cols.append({"name": "avg", "id": "avg", "type": "numeric"})
+    cols.append({"name": "Main Fail subject", "id": "Main Fail subject"})
+    cols.append({"name": "comment", "id": "comment", "editable": True})
+    return cols
 
 
-def _yield_style():
+def _yield_style(sources):
     narrow_widths = {
         "student_type": "78px",
-        "count": "56px",
-        "portion (%)": "78px",
+        "count": "60px",
+        "avg": "82px",
     }
     rules = []
     for col, w in narrow_widths.items():
@@ -99,6 +102,19 @@ def _yield_style():
             "maxWidth": w,
             "textAlign": "center",
         })
+    for src in sources or []:
+        rules.append({
+            "if": {"column_id": f"portion_{src}"},
+            "width": "82px",
+            "minWidth": "60px",
+            "maxWidth": "140px",
+            "textAlign": "center",
+        })
+    rules.append({
+        "if": {"column_id": "avg"},
+        "backgroundColor": "#eef4fb",
+        "fontWeight": "600",
+    })
     rules.append({
         "if": {"column_id": "Main Fail subject"},
         "width": "180px",
@@ -182,6 +198,9 @@ def _merge_cpk_subject(rows):
         cur = row.get("subject")
         if cur == prev:
             row["subject"] = ""
+            row["lo_limit"] = ""
+            row["hi_limit"] = ""
+            row["unit"] = ""
         else:
             prev = cur
         merged.append(row)
@@ -378,6 +397,7 @@ def register_dash(app):
         tables = tables or _load_small_tables(dataset_id)
         if tab == "yield":
             rows = tables.get("yield") or []
+            sources = (tables.get("meta") or {}).get("sources") or []
             comments = _read_yield_comments(dataset_id)
             merged = []
             for row in rows:
@@ -385,15 +405,25 @@ def register_dash(app):
                 key = str(row.get("student_type", ""))
                 row["comment"] = comments.get(key, row.get("comment", "") or "")
                 merged.append(row)
+
+            def _yield_sort_key(r):
+                st = str(r.get("student_type", "")).strip()
+                is_pass = 0 if st == "1" else 1
+                try:
+                    avg = float(r.get("avg") or 0)
+                except (TypeError, ValueError):
+                    avg = 0.0
+                return (is_pass, -avg)
+            merged.sort(key=_yield_sort_key)
+
             return html.Div([
                 html.Div("Yield", className="section-title"),
                 dash_table.DataTable(
                     id="yield-table",
-                    columns=_yield_columns(),
+                    columns=_yield_columns(sources),
                     data=merged,
                     page_size=50,
-                    sort_action="native",
-                    sort_by=[{"column_id": "portion (%)", "direction": "asc"}],
+                    sort_action="none",
                     filter_action="native",
                     editable=False,
                     style_table={"overflowX": "auto", "minWidth": "100%"},
@@ -407,7 +437,7 @@ def register_dash(app):
                         "overflow": "hidden",
                         "textOverflow": "ellipsis",
                     },
-                    style_cell_conditional=_yield_style(),
+                    style_cell_conditional=_yield_style(sources),
                     style_header={"fontWeight": 600, "background": "#f6f7f9"},
                 ),
                 html.Div(id="yield-save-status", className="save-status"),
@@ -431,6 +461,11 @@ def register_dash(app):
                     ),
                     html.Span(id="cpk-search-status", className="cpk-search-status"),
                     html.Span(id="cpk-save-status", className="save-status"),
+                    html.Div([
+                        html.Button("◀", id="cpk-prev", n_clicks=0, className="cpk-page-btn"),
+                        html.Span(id="cpk-page-indicator", className="cpk-page-indicator", children="1 / 1"),
+                        html.Button("▶", id="cpk-next", n_clicks=0, className="cpk-page-btn"),
+                    ], className="cpk-pager"),
                 ], className="cpk-search-bar"),
                 html.Div(
                     dash_table.DataTable(
@@ -441,7 +476,8 @@ def register_dash(app):
                         sort_action="none",
                         filter_action="none",
                         editable=False,
-                        style_table={"overflowX": "auto", "minWidth": "100%"},
+                        fixed_rows={"headers": True},
+                        style_table={"overflowX": "auto", "minWidth": "100%", "height": "calc(100vh - 200px)"},
                         style_cell={
                             "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
                             "fontSize": 12,
@@ -537,7 +573,7 @@ def register_dash(app):
         return f"saved {len(payload)} comment(s)"
 
     @dash_app.callback(
-        Output("cpk-table", "page_current"),
+        Output("cpk-table", "page_current", allow_duplicate=True),
         Input("cpk-subject-search", "value"),
         State("cpk-table", "data"),
         State("cpk-table", "page_size"),
@@ -599,6 +635,43 @@ def register_dash(app):
         Input("cpk-subject-search", "value"),
         Input("cpk-table", "page_current"),
         prevent_initial_call=True,
+    )
+
+    dash_app.clientside_callback(
+        """
+        function(prev_clicks, next_clicks, current, page_size, data) {
+            const ctx = dash_clientside.callback_context;
+            if (!ctx || !ctx.triggered || !ctx.triggered.length) return dash_clientside.no_update;
+            const id = ctx.triggered[0].prop_id.split('.')[0];
+            const total = (data || []).length;
+            const pages = Math.max(1, Math.ceil(total / (page_size || 200)));
+            const cur = current || 0;
+            if (id === 'cpk-prev') return Math.max(0, cur - 1);
+            if (id === 'cpk-next') return Math.min(pages - 1, cur + 1);
+            return dash_clientside.no_update;
+        }
+        """,
+        Output("cpk-table", "page_current", allow_duplicate=True),
+        Input("cpk-prev", "n_clicks"),
+        Input("cpk-next", "n_clicks"),
+        State("cpk-table", "page_current"),
+        State("cpk-table", "page_size"),
+        State("cpk-table", "data"),
+        prevent_initial_call=True,
+    )
+
+    dash_app.clientside_callback(
+        """
+        function(current, data, page_size) {
+            const total = (data || []).length;
+            const pages = Math.max(1, Math.ceil(total / (page_size || 200)));
+            return ((current || 0) + 1) + ' / ' + pages;
+        }
+        """,
+        Output("cpk-page-indicator", "children"),
+        Input("cpk-table", "page_current"),
+        Input("cpk-table", "data"),
+        State("cpk-table", "page_size"),
     )
 
     dash_app.clientside_callback(
@@ -666,12 +739,16 @@ def register_dash(app):
       .download-btn:hover { background: #eaf3fc; }
       .download-status { font-size: 11px; color: #555; min-height: 14px; }
       .save-status { font-size: 11px; color: #2d6b2d; margin-top: 6px; min-height: 14px; }
-      .cpk-search-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+      .cpk-search-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
       .cpk-search-input { width: 320px; font-size: 12px; padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px; outline: none; transition: border-color 0.15s ease, background 0.15s ease; }
       .cpk-search-input:focus { border-color: #4a90e2; }
       .cpk-search-status { font-size: 11px; color: #2369b3; min-height: 14px; }
-      .cpk-table-wrap .dash-spreadsheet-container { display: flex !important; flex-direction: column !important; }
-      .cpk-table-wrap .previous-next-container { order: -1 !important; margin: 0 0 8px !important; padding: 4px 0 !important; }
+      .cpk-pager { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+      .cpk-page-btn { font-size: 12px; padding: 3px 10px; border: 1px solid #ccc; background: #fff; border-radius: 4px; cursor: pointer; line-height: 1; }
+      .cpk-page-btn:hover { background: #f6f7f9; }
+      .cpk-page-btn:active { background: #eaeef3; }
+      .cpk-page-indicator { font-size: 12px; color: #444; min-width: 56px; text-align: center; }
+      .cpk-table-wrap .previous-next-container { display: none !important; }
       .cpk-row-highlight td { animation: cpk-pulse 2.8s ease-out; }
       @keyframes cpk-pulse {
         0% { background-color: #ffe17a; }
@@ -685,10 +762,10 @@ def register_dash(app):
       .content { padding: 16px; }
       .section-title { font-size: 16px; font-weight: 650; margin: 0 0 12px; }
       .section-title.small { margin-top: 18px; font-size: 14px; }
-      .fail-table { width: 100%; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; background: #fff; }
-      .fail-row { display: grid; grid-template-columns: 96px 88px 110px 180px minmax(360px, 1fr); border-top: 1px solid #eee; min-height: 92px; }
+      .fail-table { width: 100%; border: 1px solid #ddd; border-radius: 6px; overflow: clip; background: #fff; }
+      .fail-row { display: grid; grid-template-columns: 96px 88px 110px 180px minmax(360px, 1fr); border-top: 1px solid #eee; min-height: 92px; background: #fff; }
       .fail-row:first-child { border-top: none; }
-      .fail-row.header { min-height: 38px; background: #f6f7f9; }
+      .fail-row.header { min-height: 38px; background: #f6f7f9; position: sticky; top: 96px; z-index: 30; }
       .fail-cell { padding: 8px; font-size: 12px; border-left: 1px solid #eee; overflow: hidden; }
       .fail-cell:first-child { border-left: none; }
       .fail-cell.head { font-weight: 650; color: #333; display: flex; align-items: center; }
