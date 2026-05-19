@@ -115,9 +115,9 @@ def _yield_style(sources):
     for src in sources or []:
         rules.append({
             "if": {"column_id": f"portion_{src}"},
-            "width": "82px",
-            "minWidth": "60px",
-            "maxWidth": "140px",
+            "width": "64px",
+            "minWidth": "64px",
+            "maxWidth": "64px",
             "textAlign": "center",
         })
     rules.append({
@@ -240,6 +240,38 @@ def _write_yield_comments(dataset_id, comments):
     path = DATASETS_DIR / dataset_id / "tables" / "yield_comments.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(comments, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+
+def _read_summary_comments(dataset_id):
+    path = DATASETS_DIR / dataset_id / "tables" / "summary_yield_comments.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_summary_comments(dataset_id, comments):
+    path = DATASETS_DIR / dataset_id / "tables" / "summary_yield_comments.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(comments, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+
+def _read_summary_eval(dataset_id):
+    path = DATASETS_DIR / dataset_id / "tables" / "summary_eval.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_summary_eval(dataset_id, data):
+    path = DATASETS_DIR / dataset_id / "tables" / "summary_eval.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
 
 def _read_cpk_comments(dataset_id):
@@ -493,11 +525,12 @@ def register_dash(app):
             ], className="topbar"),
             dcc.Tabs(
                 id="tabs",
-                value="yield",
+                value="summary",
                 className="main-tabs",
                 parent_style=TABS_PARENT_STYLE,
                 content_style={"display": "none"},
                 children=[
+                    dcc.Tab(label="Summary", value="summary", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                     dcc.Tab(label="Yield", value="yield", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                     dcc.Tab(label="CPK", value="cpk", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                     dcc.Tab(label="Fail Item", value="fail", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
@@ -516,6 +549,136 @@ def register_dash(app):
     )
     def render_tab(tab, dataset_id, tables):
         tables = tables or _load_small_tables(dataset_id)
+        if tab == "summary":
+            meta = tables.get("meta") or {}
+            yield_rows = tables.get("yield") or []
+            fail_items_rows = (tables.get("fail_items") or {}).get("rows", [])
+            sources = meta.get("sources") or []
+            subjects = meta.get("subjects") or []
+
+            pass_row = next((r for r in yield_rows if str(r.get("student_type", "")) == "1"), {})
+            avg_val = pass_row.get("avg")
+            pass_yield_str = f"{avg_val:.2f}%" if avg_val is not None else "-"
+            non_pass = [r for r in fail_items_rows if str(r.get("student_type", "")) != "1"]
+
+            feature_row = {
+                "dataset": dataset_id,
+                "total_dut": meta.get("row_count", "-"),
+                "pass_count": pass_row.get("count", "-"),
+                "fail_types": len(non_pass),
+                "sources": len(sources),
+                "subjects": len(subjects),
+            }
+
+            smry_comments = _read_summary_comments(dataset_id)
+            yield_summary_rows = []
+            for i, r in enumerate(non_pass[:5], 1):
+                st = str(r.get("student_type", ""))
+                fail_subjects = r.get("fail_subjects") or []
+                main_fail = fail_subjects[0].get("subject", "N/A") if fail_subjects else "N/A"
+                avg_r = r.get("avg")
+                fail_ratio = f"{avg_r:.2f}%" if avg_r is not None else "-"
+                yield_summary_rows.append({
+                    "rank": i,
+                    "student_type": st,
+                    "main_fail_subject": main_fail,
+                    "fail_ratio": fail_ratio,
+                    "comment": smry_comments.get(st, ""),
+                })
+
+            eval_data = _read_summary_eval(dataset_id)
+            eval_rows = [
+                {"category": "Yield",  "result": eval_data.get("yield",  "")},
+                {"category": "CPK",    "result": eval_data.get("cpk",    "")},
+                {"category": "Temp",   "result": eval_data.get("temp",   "")},
+                {"category": "ETC",    "result": eval_data.get("etc",    "")},
+            ]
+
+            _hdr = {"fontWeight": 600, "background": "#f6f7f9", "fontSize": 11,
+                    "padding": "4px 8px", "textAlign": "center"}
+            _cell = {
+                "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+                "fontSize": 12, "padding": "6px 10px",
+            }
+
+            return html.Div([
+                html.Div("Feature", className="section-title"),
+                dash_table.DataTable(
+                    id="summary-feature-table",
+                    columns=[
+                        {"name": "Dataset ID",   "id": "dataset"},
+                        {"name": "Total DUT",    "id": "total_dut"},
+                        {"name": "Pass (type 1)","id": "pass_count"},
+                        {"name": "Fail Types",   "id": "fail_types"},
+                        {"name": "Sources",      "id": "sources"},
+                        {"name": "Subjects",     "id": "subjects"},
+                    ],
+                    data=[feature_row],
+                    editable=False,
+                    sort_action="none",
+                    filter_action="none",
+                    style_table={"overflowX": "auto", "marginBottom": "24px"},
+                    style_cell={**_cell, "textAlign": "center"},
+                    style_header=_hdr,
+                ),
+
+                html.Div("Yield Summary", className="section-title small"),
+                html.Div(
+                    f"Overall Pass Yield (student_type 1): {pass_yield_str}",
+                    className="summary-yield-avg",
+                ),
+                html.Div("Major Fail Bins (top 5)", className="summary-sub-title"),
+                dash_table.DataTable(
+                    id="summary-yield-table",
+                    columns=[
+                        {"name": "Rank",              "id": "rank"},
+                        {"name": "Fail Type",         "id": "student_type"},
+                        {"name": "Main Fail Subject", "id": "main_fail_subject"},
+                        {"name": "Fail Ratio",        "id": "fail_ratio"},
+                        {"name": "Comment",           "id": "comment", "editable": True},
+                    ],
+                    data=yield_summary_rows,
+                    editable=False,
+                    sort_action="none",
+                    filter_action="none",
+                    style_table={"overflowX": "auto", "marginBottom": "8px"},
+                    style_cell={**_cell, "textAlign": "left"},
+                    style_cell_conditional=[
+                        {"if": {"column_id": c}, "textAlign": "center", "width": w}
+                        for c, w in [("rank","48px"),("student_type","80px"),("fail_ratio","90px")]
+                    ] + [
+                        {"if": {"column_id": "main_fail_subject"}, "width": "260px"},
+                        {"if": {"column_id": "comment"}, "width": "320px",
+                         "backgroundColor": "#fffdf3"},
+                    ],
+                    style_header=_hdr,
+                ),
+                html.Div(id="summary-yield-save-status", className="save-status"),
+
+                html.Div("Evaluation Summary", className="section-title small"),
+                dash_table.DataTable(
+                    id="summary-eval-table",
+                    columns=[
+                        {"name": "Category", "id": "category"},
+                        {"name": "Result",   "id": "result", "editable": True},
+                    ],
+                    data=eval_rows,
+                    editable=False,
+                    sort_action="none",
+                    filter_action="none",
+                    style_table={"maxWidth": "640px", "marginBottom": "8px"},
+                    style_cell={**_cell, "textAlign": "left"},
+                    style_cell_conditional=[
+                        {"if": {"column_id": "category"},
+                         "width": "100px", "fontWeight": 600,
+                         "backgroundColor": "#f6f7f9", "textAlign": "center"},
+                        {"if": {"column_id": "result"},
+                         "width": "520px", "backgroundColor": "#fffdf3"},
+                    ],
+                    style_header=_hdr,
+                ),
+                html.Div(id="summary-eval-save-status", className="save-status"),
+            ], className="summary-tab-content")
         if tab == "yield":
             rows = tables.get("yield") or []
             sources = (tables.get("meta") or {}).get("sources") or []
@@ -537,7 +700,7 @@ def register_dash(app):
                     data=merged,
                     page_size=50,
                     sort_action="none",
-                    filter_action="native",
+                    filter_action="none",
                     editable=False,
                     style_table={"overflowX": "auto", "minWidth": "100%"},
                     style_cell={
@@ -551,7 +714,16 @@ def register_dash(app):
                         "textOverflow": "ellipsis",
                     },
                     style_cell_conditional=_yield_style(sources),
-                    style_header={"fontWeight": 600, "background": "#f6f7f9"},
+                    style_header={
+                        "fontWeight": 600,
+                        "background": "#f6f7f9",
+                        "fontSize": 10,
+                        "whiteSpace": "normal",
+                        "height": "auto",
+                        "wordBreak": "break-word",
+                        "padding": "2px 4px",
+                        "lineHeight": "1.15",
+                    },
                 ),
                 html.Div(id="yield-save-status", className="save-status"),
             ])
@@ -675,9 +847,9 @@ def register_dash(app):
                     style_header={
                         "fontWeight": 600,
                         "background": "#f6f7f9",
-                        "height": "26px",
-                        "lineHeight": "16px",
-                        "padding": "4px 8px",
+                        "height": "18px",
+                        "lineHeight": "11px",
+                        "padding": "3px 6px",
                         "whiteSpace": "nowrap",
                     },
                 ),
@@ -697,6 +869,44 @@ def register_dash(app):
         return html.Div([
             html.Iframe(src=f"/view/{dataset_id}", className="distribution-frame"),
         ], className="distribution-tab")
+
+    @dash_app.callback(
+        Output("summary-yield-save-status", "children"),
+        Input("summary-yield-table", "data_timestamp"),
+        State("summary-yield-table", "data"),
+        State("dataset-id", "data"),
+        prevent_initial_call=True,
+    )
+    def save_summary_yield_comments(_ts, data, dataset_id):
+        if not dataset_id or not data:
+            return ""
+        payload = {}
+        for row in data:
+            key = str(row.get("student_type", "")).strip()
+            comment = (row.get("comment") or "").strip()
+            if key and comment:
+                payload[key] = comment
+        _write_summary_comments(dataset_id, payload)
+        return f"saved {len(payload)} comment(s)"
+
+    @dash_app.callback(
+        Output("summary-eval-save-status", "children"),
+        Input("summary-eval-table", "data_timestamp"),
+        State("summary-eval-table", "data"),
+        State("dataset-id", "data"),
+        prevent_initial_call=True,
+    )
+    def save_summary_eval(_ts, data, dataset_id):
+        if not dataset_id or not data:
+            return ""
+        payload = {}
+        for row in data:
+            cat = (row.get("category") or "").lower()
+            result = (row.get("result") or "").strip()
+            if cat:
+                payload[cat] = result
+        _write_summary_eval(dataset_id, payload)
+        return "saved"
 
     @dash_app.callback(
         Output("yield-save-status", "children"),
@@ -1021,10 +1231,10 @@ def register_dash(app):
       .fail-table { width: 100%; border: 1px solid #ddd; border-radius: 6px; overflow: clip; background: #fff; }
       .fail-row { display: grid; grid-template-columns: 96px 88px 110px 180px minmax(360px, 1fr); border-top: 1px solid #eee; min-height: 92px; background: #fff; }
       .fail-row:first-child { border-top: none; }
-      .fail-row.header { min-height: 38px; background: #f6f7f9; position: sticky; top: 96px; z-index: 30; }
+      .fail-row.header { min-height: 27px; background: #f6f7f9; position: sticky; top: 96px; z-index: 30; }
       .fail-cell { padding: 8px; font-size: 12px; border-left: 1px solid #eee; overflow: hidden; }
       .fail-cell:first-child { border-left: none; }
-      .fail-cell.head { font-weight: 650; color: #333; display: flex; align-items: center; }
+      .fail-cell.head { font-weight: 650; color: #333; display: flex; align-items: center; padding: 4px 8px; }
       .fail-cell.type, .fail-cell.count, .fail-cell.portion, .fail-cell.main { display: flex; align-items: center; }
       .subject-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
       .subject-card { flex: 0 0 154px; border: 1px solid #ddd; border-radius: 5px; background: #fff; padding: 4px; }
@@ -1059,6 +1269,9 @@ def register_dash(app):
       .distribution-tab { height: calc(100vh - 96px); }
       .distribution-frame { width: 100%; height: 100%; border: none; background: #fff; display: block; }
       .error { padding: 32px; color: #a40000; }
+      .summary-tab-content { max-width: 1100px; }
+      .summary-yield-avg { font-size: 14px; font-weight: 600; color: #1f4d8c; margin: 8px 0 12px; }
+      .summary-sub-title { font-size: 13px; font-weight: 600; color: #444; margin: 0 0 8px; }
     </style>
   </head>
   <body>
