@@ -74,6 +74,16 @@ def _table(dash_table, table_id, rows=None, page_size=PAGE_SIZE, columns=None, *
     )
 
 
+def _yield_sort_key(r):
+    st = str(r.get("student_type", "")).strip()
+    is_pass = 0 if st == "1" else 1
+    try:
+        avg = float(r.get("avg") or 0)
+    except (TypeError, ValueError):
+        avg = 0.0
+    return (is_pass, -avg)
+
+
 def _yield_columns(sources):
     cols = [
         {"name": "student_type", "id": "student_type"},
@@ -252,6 +262,116 @@ def _cpk_comment_key(subject, source):
     return f"{(subject or '').strip()}|{(source or '').strip()}"
 
 
+def _issue_columns(sources):
+    cols = [
+        {"name": "student_type", "id": "student_type"},
+        {"name": "subject", "id": "subject"},
+        {"name": "average", "id": "avg", "type": "numeric"},
+    ]
+    for src in sources or []:
+        cols.append({"name": str(src), "id": f"portion_{src}", "type": "numeric"})
+    cols.append({"name": "Distribution", "id": "distribution", "presentation": "markdown"})
+    cols.append({"name": "Issue Point", "id": "issue_point", "editable": True})
+    cols.append({"name": "Comment", "id": "issue_comment", "editable": True})
+    cols.append({"name": "개발팀 1차 Comment", "id": "dev_comment", "editable": True})
+    cols.append({"name": "PTE 1차 comment", "id": "pte_comment", "editable": True})
+    return cols
+
+
+def _issue_style(sources):
+    rules = [
+        {"if": {"column_id": "student_type"}, "width": "90px", "minWidth": "90px", "maxWidth": "90px", "textAlign": "center"},
+        {"if": {"column_id": "subject"}, "width": "180px", "minWidth": "150px", "maxWidth": "220px"},
+        {"if": {"column_id": "avg"}, "width": "82px", "minWidth": "82px", "maxWidth": "82px", "textAlign": "center"},
+    ]
+    for src in sources or []:
+        rules.append({
+            "if": {"column_id": f"portion_{src}"},
+            "width": "82px",
+            "minWidth": "60px",
+            "maxWidth": "140px",
+            "textAlign": "center",
+        })
+    rules.append({
+        "if": {"column_id": "distribution"},
+        "width": "200px",
+        "minWidth": "160px",
+        "maxWidth": "260px",
+        "textAlign": "center",
+    })
+    for cid in ("issue_point", "issue_comment", "dev_comment", "pte_comment"):
+        rules.append({
+            "if": {"column_id": cid},
+            "width": "220px",
+            "minWidth": "180px",
+            "maxWidth": "360px",
+            "textAlign": "left",
+        })
+    return rules
+
+
+def _issue_data_style():
+    return [
+        {"if": {"column_id": "avg"}, "backgroundColor": "#eef4fb", "fontWeight": "600"},
+        {"if": {"column_id": "issue_point"}, "backgroundColor": "#fffdf3"},
+        {"if": {"column_id": "issue_comment"}, "backgroundColor": "#fffdf3"},
+        {"if": {"column_id": "dev_comment"}, "backgroundColor": "#fffdf3"},
+        {"if": {"column_id": "pte_comment"}, "backgroundColor": "#fffdf3"},
+    ]
+
+
+def _read_issue_comments(dataset_id):
+    path = DATASETS_DIR / dataset_id / "tables" / "issue_comments.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_issue_comments(dataset_id, comments):
+    path = DATASETS_DIR / dataset_id / "tables" / "issue_comments.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(comments, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+
+def _project_issue_rows(fail_items, sources, comments, dataset_id):
+    rows = []
+    pass_type = "1"
+    for r in (fail_items or {}).get("rows", []) or []:
+        st = str(r.get("student_type", "")).strip()
+        fail_subjects = r.get("fail_subjects") or []
+        if st == pass_type:
+            subject = "Pass"
+            distribution = "Pass"
+        elif fail_subjects:
+            top = fail_subjects[0]
+            subject = top.get("subject", "N/A")
+            sid = top.get("subject_id")
+            distribution = f"![](/api/{dataset_id}/thumb/{sid})" if sid is not None else "N/A"
+        else:
+            subject = "N/A"
+            distribution = "N/A"
+        saved = comments.get(st) or {}
+        if not isinstance(saved, dict):
+            saved = {}
+        row = {
+            "student_type": st,
+            "subject": subject,
+            "avg": r.get("avg"),
+            "distribution": distribution,
+            "issue_point": saved.get("issue_point", ""),
+            "issue_comment": saved.get("comment", ""),
+            "dev_comment": saved.get("dev_comment", ""),
+            "pte_comment": saved.get("pte_comment", ""),
+        }
+        for src in sources or []:
+            row[f"portion_{src}"] = r.get(f"portion_{src}")
+        rows.append(row)
+    return rows
+
+
 def _fail_item_row(html, dataset_id, row):
     subjects = row.get("fail_subjects") or []
     if not subjects:
@@ -381,6 +501,7 @@ def register_dash(app):
                     dcc.Tab(label="Yield", value="yield", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                     dcc.Tab(label="CPK", value="cpk", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                     dcc.Tab(label="Fail Item", value="fail", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
+                    dcc.Tab(label="Issue Table", value="issues", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                     dcc.Tab(label="Distribution", value="distribution", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                 ],
             ),
@@ -406,14 +527,6 @@ def register_dash(app):
                 row["comment"] = comments.get(key, row.get("comment", "") or "")
                 merged.append(row)
 
-            def _yield_sort_key(r):
-                st = str(r.get("student_type", "")).strip()
-                is_pass = 0 if st == "1" else 1
-                try:
-                    avg = float(r.get("avg") or 0)
-                except (TypeError, ValueError):
-                    avg = 0.0
-                return (is_pass, -avg)
             merged.sort(key=_yield_sort_key)
 
             return html.Div([
@@ -498,10 +611,6 @@ def register_dash(app):
         if tab == "fail":
             fail_items = tables.get("fail_items") or {"rows": []}
             rows = fail_items.get("rows", [])
-            low_cpk_groups = _build_low_cpk_groups(
-                tables.get("cpk") or [],
-                (tables.get("meta") or {}).get("subjects") or [],
-            )
             return html.Div([
                 html.Div("Fail Item", className="section-title"),
                 html.Div("student_type != 1 rows use the same yield counts, with subject thumbnails sorted by portion.", className="table-note"),
@@ -515,16 +624,76 @@ def register_dash(app):
                     ], className="fail-row header"),
                     *[_fail_item_row(html, dataset_id, row) for row in rows],
                 ], className="fail-table"),
-                html.Div("Low cpk", className="section-title"),
-                html.Div("Subjects with any source CPK ≤ 1.0; sheets shown side-by-side, sorted by lowest CPK.", className="table-note"),
-                html.Div([
-                    html.Div([
-                        html.Div("subject", className="fail-cell head low-cpk-subject"),
-                        html.Div("sheets (cpk · thumbnail)", className="fail-cell head low-cpk-strip"),
-                    ], className="fail-row header"),
-                    *[_low_cpk_row(html, dataset_id, g) for g in low_cpk_groups],
-                ], className="fail-table low-cpk-table"),
             ])
+        if tab == "issues":
+            fail_items = tables.get("fail_items") or {"rows": []}
+            sources = (tables.get("meta") or {}).get("sources") or []
+            issue_comments = _read_issue_comments(dataset_id)
+            rows = _project_issue_rows(fail_items, sources, issue_comments, dataset_id)
+            rows.sort(key=_yield_sort_key)
+            low_cpk_groups = _build_low_cpk_groups(
+                tables.get("cpk") or [],
+                (tables.get("meta") or {}).get("subjects") or [],
+            )
+            return html.Div([
+                html.Div("Yield", className="section-title"),
+                html.Div(
+                    "Most-failed subject per student_type (ties broken by count, then alphabetical). Issue Point and Comment fields are editable and auto-saved.",
+                    className="table-note",
+                ),
+                html.Div(
+                    html.Div(className="issue-top-scroll-inner"),
+                    id="issue-top-scroll",
+                    className="issue-top-scroll",
+                ),
+                dash_table.DataTable(
+                    id="issue-table",
+                    columns=_issue_columns(sources),
+                    data=rows,
+                    page_size=200,
+                    sort_action="none",
+                    filter_action="none",
+                    editable=False,
+                    fixed_columns={"headers": True, "data": 1},
+                    fixed_rows={"headers": True},
+                    markdown_options={"html": False},
+                    style_table={"overflowX": "auto", "minWidth": "100%"},
+                    style_cell={
+                        "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+                        "fontSize": 12,
+                        "padding": "6px 8px",
+                        "textAlign": "left",
+                        "minWidth": "70px",
+                        "maxWidth": "360px",
+                        "height": "120px",
+                        "whiteSpace": "normal",
+                        "overflow": "hidden",
+                        "textOverflow": "ellipsis",
+                    },
+                    style_cell_conditional=_issue_style(sources),
+                    style_data_conditional=_issue_data_style(),
+                    style_header={
+                        "fontWeight": 600,
+                        "background": "#f6f7f9",
+                        "height": "26px",
+                        "lineHeight": "16px",
+                        "padding": "4px 8px",
+                        "whiteSpace": "nowrap",
+                    },
+                ),
+                html.Div(id="issue-save-status", className="save-status"),
+                html.Details([
+                    html.Summary("Low cpk", className="section-title collapsible-summary"),
+                    html.Div("Subjects with any source CPK ≤ 1.0; sheets shown side-by-side, sorted by lowest CPK.", className="table-note"),
+                    html.Div([
+                        html.Div([
+                            html.Div("subject", className="fail-cell head low-cpk-subject"),
+                            html.Div("sheets (cpk · thumbnail)", className="fail-cell head low-cpk-strip"),
+                        ], className="fail-row header"),
+                        *[_low_cpk_row(html, dataset_id, g) for g in low_cpk_groups],
+                    ], className="fail-table low-cpk-table"),
+                ], open=True, className="low-cpk-details"),
+            ], className="issue-table-wrap")
         return html.Div([
             html.Iframe(src=f"/view/{dataset_id}", className="distribution-frame"),
         ], className="distribution-tab")
@@ -571,6 +740,93 @@ def register_dash(app):
                 payload[_cpk_comment_key(subject, source)] = comment
         _write_cpk_comments(dataset_id, payload)
         return f"saved {len(payload)} comment(s)"
+
+    @dash_app.callback(
+        Output("issue-save-status", "children"),
+        Input("issue-table", "data_timestamp"),
+        State("issue-table", "data"),
+        State("dataset-id", "data"),
+        prevent_initial_call=True,
+    )
+    def save_issue_comments(_ts, data, dataset_id):
+        if not dataset_id or not data:
+            return ""
+        payload = {}
+        for row in data:
+            key = str(row.get("student_type", "")).strip()
+            if not key:
+                continue
+            entry = {
+                "issue_point": (row.get("issue_point") or "").strip(),
+                "comment": (row.get("issue_comment") or "").strip(),
+                "dev_comment": (row.get("dev_comment") or "").strip(),
+                "pte_comment": (row.get("pte_comment") or "").strip(),
+            }
+            if any(entry.values()):
+                payload[key] = entry
+        _write_issue_comments(dataset_id, payload)
+        return f"saved {len(payload)} row(s)"
+
+    dash_app.clientside_callback(
+        """
+        function(tab) {
+            if (tab !== 'issues') return '';
+            const init = (tries) => {
+                const topScroll = document.getElementById('issue-top-scroll');
+                const table = document.getElementById('issue-table');
+                if (!topScroll || !table) {
+                    if (tries > 0) setTimeout(() => init(tries - 1), 80);
+                    return;
+                }
+                const inner = topScroll.querySelector('.issue-top-scroll-inner');
+                if (!inner) return;
+                const candidates = table.querySelectorAll('.dash-spreadsheet-container, .dash-spreadsheet-inner');
+                let scrollable = null;
+                for (const c of candidates) {
+                    if (c.scrollWidth > c.clientWidth + 1) {
+                        scrollable = c;
+                        break;
+                    }
+                }
+                if (!scrollable) {
+                    if (tries > 0) setTimeout(() => init(tries - 1), 80);
+                    return;
+                }
+                if (scrollable.dataset.topScrollBound === '1') {
+                    inner.style.width = scrollable.scrollWidth + 'px';
+                    return;
+                }
+                scrollable.dataset.topScrollBound = '1';
+                const updateWidth = () => {
+                    inner.style.width = scrollable.scrollWidth + 'px';
+                };
+                updateWidth();
+                let syncing = false;
+                topScroll.addEventListener('scroll', () => {
+                    if (syncing) return;
+                    syncing = true;
+                    scrollable.scrollLeft = topScroll.scrollLeft;
+                    requestAnimationFrame(() => { syncing = false; });
+                });
+                scrollable.addEventListener('scroll', () => {
+                    if (syncing) return;
+                    syncing = true;
+                    topScroll.scrollLeft = scrollable.scrollLeft;
+                    requestAnimationFrame(() => { syncing = false; });
+                });
+                if (window.ResizeObserver) {
+                    new ResizeObserver(updateWidth).observe(scrollable);
+                } else {
+                    window.addEventListener('resize', updateWidth);
+                }
+            };
+            setTimeout(() => init(15), 120);
+            return '';
+        }
+        """,
+        Output("issue-top-scroll", "title"),
+        Input("tabs", "value"),
+    )
 
     @dash_app.callback(
         Output("cpk-table", "page_current", allow_duplicate=True),
@@ -784,6 +1040,17 @@ def register_dash(app):
       .low-cpk-card img { display: block; width: 100%; aspect-ratio: 16 / 11; object-fit: contain; background: #fff; }
       .low-cpk-meta { font-size: 9px; color: #b04040; font-weight: 600; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .pass-label { color: #2d6b2d; font-weight: 650; }
+      #issue-table img { max-width: 180px; max-height: 100px; display: block; margin: 0 auto; }
+      #issue-table .dash-cell-value p { margin: 0; }
+      .issue-table-wrap .previous-next-container { display: none !important; }
+      .issue-top-scroll { overflow-x: auto; overflow-y: hidden; height: 14px; margin-bottom: 6px; background: #fafafa; border: 1px solid #e1e1e1; border-radius: 3px; }
+      .issue-top-scroll-inner { height: 1px; min-height: 1px; }
+      .low-cpk-details { margin-top: 18px; }
+      .low-cpk-details > summary.collapsible-summary { cursor: pointer; list-style: none; user-select: none; display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+      .low-cpk-details > summary.collapsible-summary::-webkit-details-marker { display: none; }
+      .low-cpk-details > summary.collapsible-summary::before { content: '▼'; font-size: 10px; color: #666; display: inline-block; width: 12px; }
+      .low-cpk-details:not([open]) > summary.collapsible-summary::before { content: '▶'; }
+      .low-cpk-details > summary.collapsible-summary:hover::before { color: #2369b3; }
       .image-strip { display: flex; gap: 12px; overflow-x: auto; padding: 12px 0 18px; align-items: flex-start; }
       .image-card { flex: 0 0 520px; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px; }
       .image-card img { display: block; width: 100%; height: auto; min-height: 280px; object-fit: contain; }
