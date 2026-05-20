@@ -5,7 +5,7 @@ from pathlib import Path
 from flask import abort, send_from_directory
 
 from config import DATASETS_DIR
-from table_builder import read_table_json
+from table_builder import read_table_json, get_fail_values
 
 
 PAGE_SIZE = 25
@@ -142,18 +142,29 @@ def _yield_style(sources):
 
 
 def _cpk_style():
+    # Widths tuned so total ≈ 1090px — fits most 1200px+ viewports without horizontal scroll
+    # subject(150) + lo(56) + hi(56) + unit(46) + source(82)
+    # + min(56) + median(56) + max(56) + avg(60)
+    # + stdev(52) + cpl(52) + cpu(52) + cp(52) + cpk(52)
+    # + comment(200) = ~1088px
     metric_cols = ["stdev", "cp", "cpl", "cpu", "cpk"]
-    narrow_cols = ["lo_limit", "hi_limit", "unit", "min", "median", "max", "average"]
+    limit_cols  = ["lo_limit", "hi_limit"]
+    stat_cols   = ["min", "median", "max"]
     return [
-        {"if": {"column_id": col}, "width": "78px", "minWidth": "68px", "maxWidth": "92px"}
+        {"if": {"column_id": col}, "width": "52px", "minWidth": "46px", "maxWidth": "72px", "textAlign": "right"}
         for col in metric_cols
     ] + [
-        {"if": {"column_id": col}, "width": "70px", "minWidth": "60px", "maxWidth": "92px"}
-        for col in narrow_cols
+        {"if": {"column_id": col}, "width": "56px", "minWidth": "48px", "maxWidth": "80px", "textAlign": "right"}
+        for col in limit_cols
     ] + [
-        {"if": {"column_id": "subject"}, "width": "220px", "minWidth": "180px", "maxWidth": "280px"},
-        {"if": {"column_id": "source"}, "width": "110px", "minWidth": "90px", "maxWidth": "150px"},
-        {"if": {"column_id": "comment"}, "width": "260px", "minWidth": "180px", "maxWidth": "400px",
+        {"if": {"column_id": col}, "width": "56px", "minWidth": "48px", "maxWidth": "80px", "textAlign": "right"}
+        for col in stat_cols
+    ] + [
+        {"if": {"column_id": "average"}, "width": "60px", "minWidth": "52px", "maxWidth": "80px", "textAlign": "right"},
+        {"if": {"column_id": "unit"},    "width": "46px", "minWidth": "40px", "maxWidth": "68px", "textAlign": "center"},
+        {"if": {"column_id": "subject"}, "width": "150px", "minWidth": "120px", "maxWidth": "220px"},
+        {"if": {"column_id": "source"},  "width": "82px",  "minWidth": "70px",  "maxWidth": "120px", "textAlign": "center"},
+        {"if": {"column_id": "comment"}, "width": "200px", "minWidth": "140px", "maxWidth": "360px",
          "backgroundColor": "#fffdf3", "textAlign": "left"},
     ]
 
@@ -522,6 +533,8 @@ def register_dash(app):
                 html.A("Open distribution full page", href=f"/view/{dataset_id}", target="_blank", className="link"),
                 html.Button("Download Raw XLSX", id="download-xlsx-btn", n_clicks=0, className="download-btn"),
                 html.Span(id="download-status", className="download-status"),
+                html.Button("Download Report XLSX", id="download-report-btn", n_clicks=0, className="download-btn download-btn-report"),
+                html.Span(id="download-report-status", className="download-status"),
             ], className="topbar"),
             dcc.Tabs(
                 id="tabs",
@@ -766,10 +779,10 @@ def register_dash(app):
                         style_cell={
                             "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
                             "fontSize": 12,
-                            "padding": "6px 8px",
+                            "padding": "4px 6px",
                             "textAlign": "left",
-                            "minWidth": "70px",
-                            "maxWidth": "260px",
+                            "minWidth": "46px",
+                            "maxWidth": "220px",
                             "overflow": "hidden",
                             "textOverflow": "ellipsis",
                         },
@@ -783,19 +796,104 @@ def register_dash(app):
         if tab == "fail":
             fail_items = tables.get("fail_items") or {"rows": []}
             rows = fail_items.get("rows", [])
+
+            # ── Fail Values: per-student per-subject fail records ──────────────
+            try:
+                fv_rows = get_fail_values(dataset_id)
+            except Exception:
+                fv_rows = []
+
+            fv_columns = [
+                {"name": "Source (Sheet)", "id": "source"},
+                {"name": "Call",           "id": "call"},
+                {"name": "Grade",          "id": "grade"},
+                {"name": "Class",          "id": "class"},
+                {"name": "Type",           "id": "student_type"},
+                {"name": "Subject",        "id": "subject"},
+                {"name": "Value",          "id": "value",    "type": "numeric"},
+                {"name": "Lo Limit",       "id": "lo_limit", "type": "numeric"},
+                {"name": "Hi Limit",       "id": "hi_limit", "type": "numeric"},
+                {"name": "Fail",           "id": "fail"},
+            ]
+            fv_col_style = [
+                {"if": {"column_id": "source"},       "width": "140px", "minWidth": "110px", "maxWidth": "200px"},
+                {"if": {"column_id": "call"},         "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
+                {"if": {"column_id": "grade"},        "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
+                {"if": {"column_id": "class"},        "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
+                {"if": {"column_id": "student_type"}, "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
+                {"if": {"column_id": "subject"},      "width": "220px", "minWidth": "160px", "maxWidth": "300px"},
+                {"if": {"column_id": "value"},        "width": "90px",  "minWidth": "70px",  "maxWidth": "120px", "textAlign": "right"},
+                {"if": {"column_id": "lo_limit"},     "width": "90px",  "minWidth": "70px",  "maxWidth": "120px", "textAlign": "right"},
+                {"if": {"column_id": "hi_limit"},     "width": "90px",  "minWidth": "70px",  "maxWidth": "120px", "textAlign": "right"},
+                {"if": {"column_id": "fail"},         "width": "68px",  "minWidth": "58px",  "maxWidth": "90px",  "textAlign": "center", "fontWeight": "600"},
+            ]
+            fv_data_style = [
+                {
+                    "if": {"filter_query": '{fail} = "< lo"', "column_id": "fail"},
+                    "backgroundColor": "#DBEAFE", "color": "#1E40AF",
+                },
+                {
+                    "if": {"filter_query": '{fail} = "> hi"', "column_id": "fail"},
+                    "backgroundColor": "#FEE2E2", "color": "#991B1B",
+                },
+                {
+                    "if": {"filter_query": '{fail} = "< lo"', "column_id": "value"},
+                    "color": "#1E40AF", "fontWeight": "600",
+                },
+                {
+                    "if": {"filter_query": '{fail} = "> hi"', "column_id": "value"},
+                    "color": "#991B1B", "fontWeight": "600",
+                },
+            ]
+
             return html.Div([
                 html.Div("Fail Item", className="section-title"),
                 html.Div("student_type != 1 rows use the same yield counts, with subject thumbnails sorted by portion.", className="table-note"),
-                html.Div([
+                html.Div(
                     html.Div([
-                        html.Div("student_type", className="fail-cell head type"),
-                        html.Div("count", className="fail-cell head count"),
-                        html.Div("portion (%)", className="fail-cell head portion"),
-                        html.Div("Main Fail subject", className="fail-cell head main"),
-                        html.Div("Fail Subjects", className="fail-cell head subjects"),
-                    ], className="fail-row header"),
-                    *[_fail_item_row(html, dataset_id, row) for row in rows],
-                ], className="fail-table"),
+                        html.Div([
+                            html.Div("student_type", className="fail-cell head type"),
+                            html.Div("count", className="fail-cell head count"),
+                            html.Div("portion (%)", className="fail-cell head portion"),
+                            html.Div("Main Fail subject", className="fail-cell head main"),
+                            html.Div("Fail Subjects", className="fail-cell head subjects"),
+                        ], className="fail-row header"),
+                        *[_fail_item_row(html, dataset_id, row) for row in rows],
+                    ], className="fail-table"),
+                    className="fail-table-scroll",
+                ),
+
+                # ── Fail Values ────────────────────────────────────────────────
+                html.Div("Fail Values", className="section-title small", style={"marginTop": "32px"}),
+                html.Div(
+                    f"student_type ≠ 1 인 모든 학생의 개별 fail 기록 — "
+                    f"총 {len(fv_rows):,}건 (subject별, source별 분리). "
+                    "첫 로드 시 계산 후 캐시됩니다.",
+                    className="table-note",
+                ),
+                dcc.Loading(
+                    type="circle",
+                    children=dash_table.DataTable(
+                        id="fail-values-table",
+                        columns=fv_columns,
+                        data=fv_rows,
+                        page_size=50,
+                        sort_action="native",
+                        filter_action="native",
+                        style_table={"overflowX": "auto", "minWidth": "100%"},
+                        style_cell={
+                            "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+                            "fontSize": 12,
+                            "padding": "5px 8px",
+                            "textAlign": "left",
+                            "overflow": "hidden",
+                            "textOverflow": "ellipsis",
+                        },
+                        style_cell_conditional=fv_col_style,
+                        style_data_conditional=fv_data_style,
+                        style_header={"fontWeight": 600, "background": "#f6f7f9", "fontSize": 11},
+                    ),
+                ),
             ])
         if tab == "issues":
             fail_items = tables.get("fail_items") or {"rows": []}
@@ -857,13 +955,16 @@ def register_dash(app):
                 html.Details([
                     html.Summary("Low cpk", className="section-title collapsible-summary"),
                     html.Div("Subjects with any source CPK ≤ 1.0; sheets shown side-by-side, sorted by lowest CPK.", className="table-note"),
-                    html.Div([
+                    html.Div(
                         html.Div([
-                            html.Div("subject", className="fail-cell head low-cpk-subject"),
-                            html.Div("sheets (cpk · thumbnail)", className="fail-cell head low-cpk-strip"),
-                        ], className="fail-row header"),
-                        *[_low_cpk_row(html, dataset_id, g) for g in low_cpk_groups],
-                    ], className="fail-table low-cpk-table"),
+                            html.Div([
+                                html.Div("subject", className="fail-cell head low-cpk-subject"),
+                                html.Div("sheets (cpk · thumbnail)", className="fail-cell head low-cpk-strip"),
+                            ], className="fail-row header"),
+                            *[_low_cpk_row(html, dataset_id, g) for g in low_cpk_groups],
+                        ], className="fail-table low-cpk-table"),
+                        className="fail-table-scroll",
+                    ),
                 ], open=True, className="low-cpk-details"),
             ], className="issue-table-wrap")
         return html.Div([
@@ -1187,6 +1288,52 @@ def register_dash(app):
         State("dataset-id", "data"),
     )
 
+    dash_app.clientside_callback(
+        """
+        async function(n_clicks, dataset_id) {
+          if (!n_clicks || !dataset_id) return '';
+          const filename = `${dataset_id}_report.xlsx`;
+          const url = `/api/${dataset_id}/report_xlsx`;
+          try {
+            const resp = await fetch(url, { cache: 'no-store' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const blob = await resp.blob();
+            if (window.showSaveFilePicker) {
+              try {
+                const handle = await window.showSaveFilePicker({
+                  suggestedName: filename,
+                  types: [{
+                    description: 'Excel Workbook',
+                    accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
+                  }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                return `saved: ${handle.name}`;
+              } catch (err) {
+                if (err && err.name === 'AbortError') return 'cancelled';
+              }
+            }
+            const objUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = objUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(objUrl);
+            return `downloaded: ${filename}`;
+          } catch (err) {
+            return 'error: ' + (err && err.message ? err.message : err);
+          }
+        }
+        """,
+        Output("download-report-status", "children"),
+        Input("download-report-btn", "n_clicks"),
+        State("dataset-id", "data"),
+    )
+
     dash_app.index_string = """<!DOCTYPE html>
 <html>
   <head>
@@ -1203,6 +1350,8 @@ def register_dash(app):
       .link { font-size: 12px; color: #2369b3; text-decoration: none; }
       .download-btn { font-size: 12px; padding: 5px 12px; border: 1px solid #2369b3; background: #f7fbff; color: #1f4d8c; border-radius: 4px; cursor: pointer; }
       .download-btn:hover { background: #eaf3fc; }
+      .download-btn-report { border-color: #2d7d46; background: #f4fbf6; color: #1a4d2b; }
+      .download-btn-report:hover { background: #e6f5eb; }
       .download-status { font-size: 11px; color: #555; min-height: 14px; }
       .save-status { font-size: 11px; color: #2d6b2d; margin-top: 6px; min-height: 14px; }
       .cpk-search-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
@@ -1228,10 +1377,12 @@ def register_dash(app):
       .content { padding: 16px; }
       .section-title { font-size: 16px; font-weight: 650; margin: 0 0 12px; }
       .section-title.small { margin-top: 18px; font-size: 14px; }
-      .fail-table { width: 100%; border: 1px solid #ddd; border-radius: 6px; overflow: clip; background: #fff; }
+      .fail-table-scroll { border: 1px solid #ddd; border-radius: 6px; overflow-y: auto; max-height: 65vh; }
+      .fail-table { width: 100%; overflow: clip; background: #fff; }
       .fail-row { display: grid; grid-template-columns: 96px 88px 110px 180px minmax(360px, 1fr); border-top: 1px solid #eee; min-height: 92px; background: #fff; }
       .fail-row:first-child { border-top: none; }
-      .fail-row.header { min-height: 27px; background: #f6f7f9; position: sticky; top: 96px; z-index: 30; }
+      .fail-row.header { min-height: 27px; background: #f6f7f9; }
+      .fail-table-scroll .fail-row.header { position: sticky; top: 0; z-index: 10; }
       .fail-cell { padding: 8px; font-size: 12px; border-left: 1px solid #eee; overflow: hidden; }
       .fail-cell:first-child { border-left: none; }
       .fail-cell.head { font-weight: 650; color: #333; display: flex; align-items: center; padding: 4px 8px; }
