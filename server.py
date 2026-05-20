@@ -12,6 +12,7 @@ import dataset_builder
 from config import DATASETS_DIR
 from dash_dashboard import send_fail_png
 from table_builder import build_raw_xlsx
+from xlsx_export import build_report_xlsx
 
 bp = Blueprint("cumulative", __name__)
 DEFAULT_DATASET = "current"
@@ -124,6 +125,26 @@ def raw_xlsx(id):
         BytesIO(data),
         as_attachment=True,
         download_name=f"{id}_raw.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@bp.get("/api/<id>/report_xlsx")
+def report_xlsx(id):
+    if not _safe(id):
+        abort(400)
+    if not (DATASETS_DIR / id / "tables" / "meta.json").exists():
+        abort(404)
+    try:
+        data = build_report_xlsx(id)
+    except Exception as exc:
+        abort(500, f"Report generation failed: {exc}")
+    resp = send_file(
+        BytesIO(data),
+        as_attachment=True,
+        download_name=f"{id}_report.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     resp.headers["Cache-Control"] = "no-cache"

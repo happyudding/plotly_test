@@ -14,6 +14,9 @@ SUBJECT_NAME_ROW, UNIT_ROW, LO_LIMIT_ROW, HI_LIMIT_ROW = 0, 1, 2, 3
 STUDENT_DATA_START_ROW = 6
 
 COLS_PER_ROW = 5
+
+# Base URL of the running Flask server (used for hyperlinks in exported XLSX)
+SERVER_BASE_URL = "http://127.0.0.1:5000"
 CELL_ASPECT_W, CELL_ASPECT_H = 16, 11
 
 LINE_COLOR = "royalblue"

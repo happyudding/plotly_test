@@ -702,11 +702,14 @@ def register_dash(app):
                 key = str(row.get("student_type", ""))
                 row["comment"] = comments.get(key, row.get("comment", "") or "")
                 merged.append(row)
-
             merged.sort(key=_yield_sort_key)
 
             return html.Div([
                 html.Div("Yield", className="section-title"),
+                html.Div(
+                    "Excel처럼 셀을 드래그 또는 Ctrl/Shift+클릭으로 다중 선택하면 하단 상태바에 합계·평균·개수·최대·최소가 자동 표시됩니다.",
+                    className="table-note",
+                ),
                 dash_table.DataTable(
                     id="yield-table",
                     columns=_yield_columns(sources),
@@ -715,6 +718,8 @@ def register_dash(app):
                     sort_action="none",
                     filter_action="none",
                     editable=False,
+                    cell_selectable=True,
+                    selected_cells=[],
                     style_table={"overflowX": "auto", "minWidth": "100%"},
                     style_cell={
                         "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
@@ -727,6 +732,11 @@ def register_dash(app):
                         "textOverflow": "ellipsis",
                     },
                     style_cell_conditional=_yield_style(sources),
+                    style_data_conditional=[
+                        {"if": {"state": "selected"},
+                         "backgroundColor": "#cfe2ff",
+                         "border": "1px solid #3b82f6"},
+                    ],
                     style_header={
                         "fontWeight": 600,
                         "background": "#f6f7f9",
@@ -738,6 +748,14 @@ def register_dash(app):
                         "lineHeight": "1.15",
                     },
                 ),
+                html.Div([
+                    html.Span("선택 영역 집계:", className="agg-bar-label"),
+                    html.Span("Sum: -",   id="yield-agg-sum",   className="agg-stat"),
+                    html.Span("Avg: -",   id="yield-agg-avg",   className="agg-stat"),
+                    html.Span("Count: 0", id="yield-agg-count", className="agg-stat"),
+                    html.Span("Min: -",   id="yield-agg-min",   className="agg-stat"),
+                    html.Span("Max: -",   id="yield-agg-max",   className="agg-stat"),
+                ], className="agg-bar"),
                 html.Div(id="yield-save-status", className="save-status"),
             ])
         if tab == "cpk":
@@ -1027,6 +1045,52 @@ def register_dash(app):
                 payload[key] = comment
         _write_yield_comments(dataset_id, payload)
         return f"saved {len(payload)} comment(s)"
+
+    # ── Yield 탭: Excel-like 셀 선택 집계 (clientside, 서버 부하 0) ──────────
+    dash_app.clientside_callback(
+        """
+        function(selectedCells, data) {
+            if (!selectedCells || !selectedCells.length || !data) {
+                return ['Sum: -', 'Avg: -', 'Count: 0', 'Min: -', 'Max: -'];
+            }
+            const nums = [];
+            for (const c of selectedCells) {
+                const row = data[c.row];
+                if (!row) continue;
+                const v = row[c.column_id];
+                const f = parseFloat(v);
+                if (!isNaN(f) && isFinite(f)) nums.push(f);
+            }
+            if (!nums.length) {
+                return ['Sum: -', 'Avg: -',
+                        'Count: ' + selectedCells.length + ' (no numbers)',
+                        'Min: -', 'Max: -'];
+            }
+            const sum = nums.reduce(function(a, b) { return a + b; }, 0);
+            const avg = sum / nums.length;
+            const mn  = Math.min.apply(null, nums);
+            const mx  = Math.max.apply(null, nums);
+            const fmt = function(x) {
+                if (Number.isInteger(x)) return String(x);
+                return x.toFixed(4).replace(/\\.?0+$/, '');
+            };
+            return [
+                'Sum: '   + fmt(sum),
+                'Avg: '   + fmt(avg),
+                'Count: ' + nums.length,
+                'Min: '   + fmt(mn),
+                'Max: '   + fmt(mx),
+            ];
+        }
+        """,
+        Output("yield-agg-sum",   "children"),
+        Output("yield-agg-avg",   "children"),
+        Output("yield-agg-count", "children"),
+        Output("yield-agg-min",   "children"),
+        Output("yield-agg-max",   "children"),
+        Input("yield-table", "selected_cells"),
+        State("yield-table", "data"),
+    )
 
     @dash_app.callback(
         Output("cpk-save-status", "children"),
@@ -1423,6 +1487,10 @@ def register_dash(app):
       .summary-tab-content { max-width: 1100px; }
       .summary-yield-avg { font-size: 14px; font-weight: 600; color: #1f4d8c; margin: 8px 0 12px; }
       .summary-sub-title { font-size: 13px; font-weight: 600; color: #444; margin: 0 0 8px; }
+      .agg-bar { display: flex; align-items: center; gap: 18px; padding: 8px 14px; margin-top: 8px;
+                 background: #f0f4fa; border: 1px solid #c5d3e7; border-radius: 4px; font-size: 12px; }
+      .agg-bar-label { font-weight: 600; color: #1f4d8c; }
+      .agg-stat { font-family: "Consolas", "Menlo", monospace; color: #333; min-width: 90px; }
     </style>
   </head>
   <body>

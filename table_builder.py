@@ -320,6 +320,97 @@ def read_table_json(dataset_id, name):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def build_fail_values(dataset_id: str) -> list:
+    """
+    For every non-pass student (student_type != '1') in every input CSV,
+    find each subject whose measured value is outside [lo_limit, hi_limit].
+
+    Returns a flat list of dicts — one entry per (student, failing subject):
+      source, call, grade, class, student_type,
+      subject, value, lo_limit, hi_limit, fail ("< lo" | "> hi")
+    """
+    from data_loader import load_table
+
+    input_dir = DATASETS_DIR / dataset_id / "input"
+    if not input_dir.exists():
+        return []
+
+    schools = {p.stem: load_table(p) for p in sorted(input_dir.glob("*.csv"))}
+    all_rows = []
+
+    for source_name, table in schools.items():
+        subjects_list = _subject_columns(table)   # [subj_name, ...] indexed 0..n-1
+        n_sub = len(subjects_list)
+
+        meta = table.meta.reset_index(drop=True).copy()
+        meta["student_type"] = meta["student_type"].map(_fmt_type)
+
+        non_pass_mask = meta["student_type"] != PASS_STUDENT_TYPE
+        if not non_pass_mask.any():
+            continue
+
+        meta_np   = meta[non_pass_mask].reset_index(drop=True)
+        scores_np = table.scores[non_pass_mask].reset_index(drop=True)
+        numeric   = scores_np.apply(pd.to_numeric, errors="coerce")
+        # numeric columns are integer labels 0 .. n_sub-1
+
+        lo_arr = [table.lo_limits[i] if i < len(table.lo_limits) else None for i in range(n_sub)]
+        hi_arr = [table.hi_limits[i] if i < len(table.hi_limits) else None for i in range(n_sub)]
+
+        # Vectorised fail masks per direction
+        fail_lo = pd.DataFrame(False, index=numeric.index, columns=numeric.columns)
+        fail_hi = pd.DataFrame(False, index=numeric.index, columns=numeric.columns)
+
+        for idx in range(n_sub):
+            lo, hi = lo_arr[idx], hi_arr[idx]
+            col_s  = numeric.iloc[:, idx]
+            if lo is not None and pd.notna(lo):
+                fail_lo.iloc[:, idx] = (col_s < float(lo)).fillna(False)
+            if hi is not None and pd.notna(hi):
+                fail_hi.iloc[:, idx] = (col_s > float(hi)).fillna(False)
+
+        fail_any = fail_lo | fail_hi
+
+        # Stack wide mask → long index of (row_label, col_label) for True cells
+        failing = fail_any.stack()
+        failing = failing[failing]
+        if len(failing) == 0:
+            continue
+
+        for row_i, col_i in failing.index:
+            subj_name = subjects_list[col_i]
+            val       = numeric.at[row_i, col_i]
+            lo        = lo_arr[col_i]
+            hi        = hi_arr[col_i]
+            is_lo     = bool(fail_lo.at[row_i, col_i])
+            meta_row  = meta_np.iloc[row_i]
+
+            all_rows.append({
+                "source":       source_name,
+                "call":         _fmt_type(meta_row["call"]),
+                "grade":        _fmt_type(meta_row["grade"]),
+                "class":        _fmt_type(meta_row["class"]),
+                "student_type": _fmt_type(meta_row["student_type"]),
+                "subject":      subj_name,
+                "value":        _fmt_num(val),
+                "lo_limit":     _fmt_num(lo) if (lo is not None and pd.notna(lo)) else "N/A",
+                "hi_limit":     _fmt_num(hi) if (hi is not None and pd.notna(hi)) else "N/A",
+                "fail":         "< lo" if is_lo else "> hi",
+            })
+
+    return all_rows
+
+
+def get_fail_values(dataset_id: str) -> list:
+    """Return fail_values rows, computing and caching to disk on first call."""
+    cache_path = DATASETS_DIR / dataset_id / "tables" / "fail_values.json"
+    if cache_path.exists():
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+    rows = build_fail_values(dataset_id)
+    _write_json(cache_path, rows)
+    return rows
+
+
 def build_raw_xlsx(dataset_id):
     from data_loader import load_table
 
