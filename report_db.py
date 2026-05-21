@@ -1,0 +1,392 @@
+import sqlite3
+import time
+from contextlib import contextmanager
+
+from config import REPORT_DB_PATH, REPORT_LOCK_TTL_SEC
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS report_session (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    TEXT UNIQUE NOT NULL,
+    analysis_key  TEXT,
+    file_name     TEXT NOT NULL,
+    file_path     TEXT,
+    content_hash  TEXT,
+    status        TEXT DEFAULT 'pending',
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER,
+    error_message TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_report_session_analysis_key
+    ON report_session(analysis_key);
+
+CREATE TABLE IF NOT EXISTS report_analysis_summary (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_key  TEXT NOT NULL,
+    session_id    TEXT,
+    item_name     TEXT NOT NULL,
+    bin_number    INTEGER,
+    yield_percent REAL,
+    fail_count    INTEGER,
+    cpk_val       REAL,
+    mean_val      REAL,
+    stdev_val     REAL,
+    lsl           REAL,
+    usl           REAL,
+    unit          TEXT,
+    created_at    INTEGER NOT NULL,
+    UNIQUE(analysis_key, item_name, bin_number)
+);
+CREATE INDEX IF NOT EXISTS idx_report_summary_analysis_key
+    ON report_analysis_summary(analysis_key);
+
+CREATE TABLE IF NOT EXISTS report_object_info (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_key  TEXT NOT NULL,
+    object_type   TEXT NOT NULL,
+    content_hash  TEXT NOT NULL,
+    options_json  TEXT NOT NULL,
+    s3_bucket     TEXT,
+    s3_key        TEXT NOT NULL,
+    s3_uri        TEXT,
+    created_at    INTEGER NOT NULL,
+    last_accessed INTEGER,
+    UNIQUE(analysis_key, object_type)
+);
+CREATE INDEX IF NOT EXISTS idx_report_object_content_hash
+    ON report_object_info(content_hash);
+CREATE INDEX IF NOT EXISTS idx_report_object_last_accessed
+    ON report_object_info(last_accessed);
+
+CREATE TABLE IF NOT EXISTS report_analysis_lock (
+    analysis_key  TEXT PRIMARY KEY,
+    owner         TEXT NOT NULL,
+    locked_at     INTEGER NOT NULL,
+    expires_at    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS report_csv_files (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_key TEXT NOT NULL,
+    filename     TEXT NOT NULL,
+    s3_key       TEXT NOT NULL,
+    s3_uri       TEXT,
+    file_size    INTEGER,
+    uploaded_at  INTEGER NOT NULL,
+    UNIQUE(analysis_key, filename)
+);
+CREATE INDEX IF NOT EXISTS idx_report_csv_analysis_key
+    ON report_csv_files(analysis_key);
+
+CREATE TABLE IF NOT EXISTS report_annotation (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT NOT NULL,
+    analysis_key TEXT,
+    target       TEXT NOT NULL,
+    content      TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_report_annotation_session
+    ON report_annotation(session_id);
+"""
+
+_SUMMARY_COLUMNS = (
+    "analysis_key", "session_id", "item_name", "bin_number",
+    "yield_percent", "fail_count", "cpk_val", "mean_val", "stdev_val",
+    "lsl", "usl", "unit", "created_at",
+)
+
+
+def _now():
+    return int(time.time())
+
+
+def _migrate(conn):
+    """report_object_info: analysis_key が PK → (analysis_key, object_type) UNIQUE に移行."""
+    info = conn.execute("PRAGMA table_info(report_object_info)").fetchall()
+    col_names = [r[1] for r in info]
+    if "id" not in col_names:
+        conn.execute("ALTER TABLE report_object_info RENAME TO _report_object_info_old")
+        conn.execute("""
+            CREATE TABLE report_object_info (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                analysis_key  TEXT NOT NULL,
+                object_type   TEXT NOT NULL,
+                content_hash  TEXT NOT NULL,
+                options_json  TEXT NOT NULL,
+                s3_bucket     TEXT,
+                s3_key        TEXT NOT NULL,
+                s3_uri        TEXT,
+                created_at    INTEGER NOT NULL,
+                last_accessed INTEGER,
+                UNIQUE(analysis_key, object_type)
+            )
+        """)
+        conn.execute("""
+            INSERT INTO report_object_info
+                (analysis_key, object_type, content_hash, options_json,
+                 s3_bucket, s3_key, s3_uri, created_at, last_accessed)
+            SELECT analysis_key, object_type, content_hash, options_json,
+                   s3_bucket, s3_key, s3_uri, created_at, last_accessed
+            FROM _report_object_info_old
+        """)
+        conn.execute("DROP TABLE _report_object_info_old")
+
+
+def init_report_db():
+    REPORT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(REPORT_DB_PATH) as conn:
+        _migrate(conn)
+        conn.executescript(SCHEMA)
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA temp_store = MEMORY")
+        conn.execute("PRAGMA busy_timeout = 5000")
+
+
+@contextmanager
+def get_conn():
+    conn = sqlite3.connect(REPORT_DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _row(row):
+    return None if row is None else dict(row)
+
+
+# ── session ─────────────────────────────────────────────────────────────────
+
+def create_session(session_id, file_name, file_path):
+    now = _now()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO report_session (session_id, file_name, file_path, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'pending', ?, ?)",
+            (session_id, file_name, str(file_path), now, now),
+        )
+
+
+_SESSION_UPDATABLE = {"analysis_key", "content_hash", "status", "error_message", "file_path"}
+
+
+def update_session(session_id, **fields):
+    fields = {k: v for k, v in fields.items() if k in _SESSION_UPDATABLE}
+    if not fields:
+        return
+    cols = ", ".join(f"{k}=?" for k in fields) + ", updated_at=?"
+    params = list(fields.values()) + [_now(), session_id]
+    with get_conn() as conn:
+        conn.execute(f"UPDATE report_session SET {cols} WHERE session_id=?", params)
+
+
+def get_session(session_id):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM report_session WHERE session_id=?", (session_id,)
+        ).fetchone()
+    return _row(row)
+
+
+def get_session_path_by_analysis_key(analysis_key):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT file_path FROM report_session "
+            "WHERE analysis_key=? AND file_path IS NOT NULL "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (analysis_key,),
+        ).fetchone()
+    return row["file_path"] if row else None
+
+
+# ── summary ──────────────────────────────────────────────────────────────────
+
+def get_summary_by_analysis_key(analysis_key):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT item_name, bin_number, yield_percent, fail_count, cpk_val, "
+            "mean_val, stdev_val, lsl, usl, unit "
+            "FROM report_analysis_summary WHERE analysis_key=? "
+            "ORDER BY item_name, bin_number IS NULL DESC, bin_number",
+            (analysis_key,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def has_summary(analysis_key):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM report_analysis_summary WHERE analysis_key=? LIMIT 1",
+            (analysis_key,),
+        ).fetchone()
+    return row is not None
+
+
+def save_summary_batch(analysis_key, session_id, rows):
+    if not rows:
+        return 0
+    now = _now()
+    payload = [
+        (
+            analysis_key, session_id,
+            r["item_name"], r.get("bin_number"),
+            r.get("yield_percent"), r.get("fail_count"), r.get("cpk_val"),
+            r.get("mean_val"), r.get("stdev_val"), r.get("lsl"), r.get("usl"),
+            r.get("unit"), now,
+        )
+        for r in rows
+    ]
+    placeholders = ",".join(["?"] * len(_SUMMARY_COLUMNS))
+    cols = ",".join(_SUMMARY_COLUMNS)
+    with get_conn() as conn:
+        conn.executemany(
+            f"INSERT OR IGNORE INTO report_analysis_summary ({cols}) VALUES ({placeholders})",
+            payload,
+        )
+    return len(payload)
+
+
+# ── object_info ──────────────────────────────────────────────────────────────
+
+def get_object_info(analysis_key, object_type="plotly"):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM report_object_info WHERE analysis_key=? AND object_type=?",
+            (analysis_key, object_type),
+        ).fetchone()
+    return _row(row)
+
+
+def get_all_object_infos(analysis_key):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM report_object_info WHERE analysis_key=? ORDER BY object_type",
+            (analysis_key,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def upsert_object_info(analysis_key, content_hash, options_json,
+                       object_type, bucket, key, uri):
+    now = _now()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO report_object_info "
+            "(analysis_key, object_type, content_hash, options_json, "
+            " s3_bucket, s3_key, s3_uri, created_at, last_accessed) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(analysis_key, object_type) DO UPDATE SET "
+            "  content_hash=excluded.content_hash, "
+            "  options_json=excluded.options_json, "
+            "  s3_bucket=excluded.s3_bucket, "
+            "  s3_key=excluded.s3_key, "
+            "  s3_uri=excluded.s3_uri, "
+            "  last_accessed=excluded.last_accessed",
+            (analysis_key, object_type, content_hash, options_json,
+             bucket, key, uri, now, now),
+        )
+
+
+def touch_object_info(analysis_key, object_type="plotly"):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE report_object_info SET last_accessed=? "
+            "WHERE analysis_key=? AND object_type=?",
+            (_now(), analysis_key, object_type),
+        )
+
+
+# ── lock ─────────────────────────────────────────────────────────────────────
+
+def try_acquire_analysis_lock(analysis_key, owner):
+    now = _now()
+    expires = now + REPORT_LOCK_TTL_SEC
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM report_analysis_lock WHERE expires_at <= ?", (now,)
+        )
+        try:
+            conn.execute(
+                "INSERT INTO report_analysis_lock "
+                "(analysis_key, owner, locked_at, expires_at) VALUES (?, ?, ?, ?)",
+                (analysis_key, owner, now, expires),
+            )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def release_analysis_lock(analysis_key, owner):
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM report_analysis_lock WHERE analysis_key=? AND owner=?",
+            (analysis_key, owner),
+        )
+
+
+# ── csv files ─────────────────────────────────────────────────────────────────
+
+def upsert_csv_file(analysis_key, filename, s3_key, s3_uri, file_size):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO report_csv_files "
+            "(analysis_key, filename, s3_key, s3_uri, file_size, uploaded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(analysis_key, filename) DO UPDATE SET "
+            "  s3_key=excluded.s3_key, s3_uri=excluded.s3_uri, "
+            "  file_size=excluded.file_size, uploaded_at=excluded.uploaded_at",
+            (analysis_key, filename, s3_key, s3_uri, file_size, _now()),
+        )
+
+
+def get_csv_files(analysis_key):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT filename, s3_key, s3_uri, file_size, uploaded_at "
+            "FROM report_csv_files WHERE analysis_key=? ORDER BY filename",
+            (analysis_key,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── annotations ──────────────────────────────────────────────────────────────
+
+def create_annotation(session_id, analysis_key, target, content):
+    now = _now()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO report_annotation "
+            "(session_id, analysis_key, target, content, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, analysis_key, target, content, now, now),
+        )
+        return cur.lastrowid
+
+
+def get_annotations(session_id):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, session_id, analysis_key, target, content, created_at, updated_at "
+            "FROM report_annotation WHERE session_id=? ORDER BY created_at",
+            (session_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_annotation(annotation_id, content):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE report_annotation SET content=?, updated_at=? WHERE id=?",
+            (content, _now(), annotation_id),
+        )
+
+
+def delete_annotation(annotation_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM report_annotation WHERE id=?", (annotation_id,))

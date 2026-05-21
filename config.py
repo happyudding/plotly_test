@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -25,3 +26,21 @@ MARKER_SIZE = 5
 LIMIT_LINE_WIDTH = 1
 X_RANGE_PADDING_RATIO = 0.15
 TITLE_FONT_SIZE = 11
+
+# Report module (/pe/report) ------------------------------------------------
+REPORT_DB_PATH = ROOT_DIR / "DB" / "pe" / "report" / "report.db"
+REPORT_UPLOAD_DIR = ROOT_DIR / "uploads" / "report"
+
+REPORT_S3_ENDPOINT = os.getenv("REPORT_S3_ENDPOINT", "")
+REPORT_S3_BUCKET = os.getenv("REPORT_S3_BUCKET", "")
+REPORT_S3_REGION = os.getenv("REPORT_S3_REGION", "us-east-1")
+REPORT_S3_ACCESS_KEY = os.getenv("REPORT_S3_ACCESS_KEY", "")
+REPORT_S3_SECRET_KEY = os.getenv("REPORT_S3_SECRET_KEY", "")
+REPORT_S3_PREFIX      = os.getenv("REPORT_S3_PREFIX",      "pe/report/plotly")
+REPORT_S3_CSV_PREFIX  = os.getenv("REPORT_S3_CSV_PREFIX",  "pe/report/origin_csv_files")
+REPORT_S3_FAIL_PREFIX = os.getenv("REPORT_S3_FAIL_PREFIX", "pe/report/fail_items")
+REPORT_S3_ISSUE_PREFIX= os.getenv("REPORT_S3_ISSUE_PREFIX","pe/report/issue_table")
+
+REPORT_LOCK_TTL_SEC = 300
+REPORT_LOCK_POLL_SEC = 0.5
+REPORT_LOCK_MAX_WAIT_SEC = 60

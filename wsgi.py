@@ -1,9 +1,11 @@
 from flask import Flask
 
+from report_extension import report_bp
 from server import bp
 
 app = Flask(__name__)
 app.register_blueprint(bp)
+app.register_blueprint(report_bp)
 
 try:
     from dash_dashboard import register_dash
