@@ -99,9 +99,9 @@ def _yield_columns(sources):
 
 def _yield_style(sources):
     narrow_widths = {
-        "student_type": "78px",
-        "count": "60px",
-        "avg": "82px",
+        "student_type": "54px",
+        "count": "42px",
+        "avg": "58px",
     }
     rules = []
     for col, w in narrow_widths.items():
@@ -115,9 +115,9 @@ def _yield_style(sources):
     for src in sources or []:
         rules.append({
             "if": {"column_id": f"portion_{src}"},
-            "width": "64px",
-            "minWidth": "64px",
-            "maxWidth": "64px",
+            "width": "46px",
+            "minWidth": "46px",
+            "maxWidth": "46px",
             "textAlign": "center",
         })
     rules.append({
@@ -285,6 +285,22 @@ def _write_summary_eval(dataset_id, data):
     path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
 
+def _read_summary_feature(dataset_id):
+    path = DATASETS_DIR / dataset_id / "tables" / "summary_feature.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_summary_feature(dataset_id, data):
+    path = DATASETS_DIR / dataset_id / "tables" / "summary_feature.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+
 def _read_cpk_comments(dataset_id):
     path = DATASETS_DIR / dataset_id / "tables" / "cpk_comments.json"
     if not path.exists():
@@ -323,16 +339,16 @@ def _issue_columns(sources):
 
 def _issue_style(sources):
     rules = [
-        {"if": {"column_id": "student_type"}, "width": "90px", "minWidth": "90px", "maxWidth": "90px", "textAlign": "center"},
+        {"if": {"column_id": "student_type"}, "width": "62px", "minWidth": "62px", "maxWidth": "62px", "textAlign": "center"},
         {"if": {"column_id": "subject"}, "width": "180px", "minWidth": "150px", "maxWidth": "220px"},
-        {"if": {"column_id": "avg"}, "width": "82px", "minWidth": "82px", "maxWidth": "82px", "textAlign": "center"},
+        {"if": {"column_id": "avg"}, "width": "58px", "minWidth": "58px", "maxWidth": "58px", "textAlign": "center"},
     ]
     for src in sources or []:
         rules.append({
             "if": {"column_id": f"portion_{src}"},
-            "width": "82px",
-            "minWidth": "60px",
-            "maxWidth": "140px",
+            "width": "58px",
+            "minWidth": "46px",
+            "maxWidth": "80px",
             "textAlign": "center",
         })
     rules.append({
@@ -566,45 +582,53 @@ def register_dash(app):
             meta = tables.get("meta") or {}
             yield_rows = tables.get("yield") or []
             fail_items_rows = (tables.get("fail_items") or {}).get("rows", [])
-            sources = meta.get("sources") or []
-            subjects = meta.get("subjects") or []
 
             pass_row = next((r for r in yield_rows if str(r.get("student_type", "")) == "1"), {})
-            avg_val = pass_row.get("avg")
-            pass_yield_str = f"{avg_val:.2f}%" if avg_val is not None else "-"
+            pass_portion = pass_row.get("portion (%)")
+            if isinstance(pass_portion, (int, float)):
+                pass_yield_str = f"{pass_portion:.2f}%"
+            elif pass_portion is not None:
+                pass_yield_str = str(pass_portion)
+            else:
+                pass_yield_str = "-"
             non_pass = [r for r in fail_items_rows if str(r.get("student_type", "")) != "1"]
 
+            # ── Feature Table ─────────────────────────────────────────────────
+            saved_feat = _read_summary_feature(dataset_id)
             feature_row = {
-                "dataset": dataset_id,
-                "total_dut": meta.get("row_count", "-"),
-                "pass_count": pass_row.get("count", "-"),
-                "fail_types": len(non_pass),
-                "sources": len(sources),
-                "subjects": len(subjects),
+                "subject":       saved_feat.get("subject",       dataset_id),
+                "customer_type": saved_feat.get("customer_type", ""),
+                "gd":            saved_feat.get("gd",            ""),
+                "process":       saved_feat.get("process",       ""),
+                "line":          saved_feat.get("line",          ""),
+                "version":       saved_feat.get("version",       ""),
             }
 
+            # ── Yield Summary ─────────────────────────────────────────────────
             smry_comments = _read_summary_comments(dataset_id)
             yield_summary_rows = []
             for i, r in enumerate(non_pass[:5], 1):
                 st = str(r.get("student_type", ""))
                 fail_subjects = r.get("fail_subjects") or []
-                main_fail = fail_subjects[0].get("subject", "N/A") if fail_subjects else "N/A"
-                avg_r = r.get("avg")
-                fail_ratio = f"{avg_r:.2f}%" if avg_r is not None else "-"
+                main_fail = (fail_subjects[0].get("subject", "N/A")
+                             if fail_subjects else r.get("Main Fail subject", "N/A"))
+                portion = r.get("portion (%)", "")
+                major_fail_str = f"{st}  {main_fail}  {portion}%"
                 yield_summary_rows.append({
-                    "rank": i,
-                    "student_type": st,
-                    "main_fail_subject": main_fail,
-                    "fail_ratio": fail_ratio,
-                    "comment": smry_comments.get(st, ""),
+                    "no":         "",
+                    "yield":      pass_yield_str if i == 1 else "",
+                    "major_fail": major_fail_str,
+                    "comment":    smry_comments.get(st, ""),
+                    "_key":       st,
                 })
 
+            # ── Evaluation Summary ────────────────────────────────────────────
             eval_data = _read_summary_eval(dataset_id)
             eval_rows = [
-                {"category": "Yield",  "result": eval_data.get("yield",  "")},
-                {"category": "CPK",    "result": eval_data.get("cpk",    "")},
-                {"category": "Temp",   "result": eval_data.get("temp",   "")},
-                {"category": "ETC",    "result": eval_data.get("etc",    "")},
+                {"category": "Yield", "condition_limit": eval_data.get("yield_cond", ""), "result": eval_data.get("yield",  "")},
+                {"category": "CPK",   "condition_limit": eval_data.get("cpk_cond",   ""), "result": eval_data.get("cpk",    "")},
+                {"category": "Temp",  "condition_limit": eval_data.get("temp_cond",  ""), "result": eval_data.get("temp",   "")},
+                {"category": "ETC",   "condition_limit": eval_data.get("etc_cond",   ""), "result": eval_data.get("etc",    "")},
             ]
 
             _hdr = {"fontWeight": 600, "background": "#f6f7f9", "fontSize": 11,
@@ -615,40 +639,37 @@ def register_dash(app):
             }
 
             return html.Div([
+                # ── Feature ───────────────────────────────────────────────────
                 html.Div("Feature", className="section-title"),
                 dash_table.DataTable(
                     id="summary-feature-table",
                     columns=[
-                        {"name": "Dataset ID",   "id": "dataset"},
-                        {"name": "Total DUT",    "id": "total_dut"},
-                        {"name": "Pass (type 1)","id": "pass_count"},
-                        {"name": "Fail Types",   "id": "fail_types"},
-                        {"name": "Sources",      "id": "sources"},
-                        {"name": "Subjects",     "id": "subjects"},
+                        {"name": "subject",        "id": "subject",       "editable": True},
+                        {"name": "Customer Type",  "id": "customer_type", "editable": True},
+                        {"name": "GD",             "id": "gd",            "editable": True},
+                        {"name": "Process",        "id": "process",       "editable": True},
+                        {"name": "Line",           "id": "line",          "editable": True},
+                        {"name": "version",        "id": "version",       "editable": True},
                     ],
                     data=[feature_row],
                     editable=False,
                     sort_action="none",
                     filter_action="none",
                     style_table={"overflowX": "auto", "marginBottom": "24px"},
-                    style_cell={**_cell, "textAlign": "center"},
+                    style_cell={**_cell, "textAlign": "center", "backgroundColor": "#fffdf3"},
                     style_header=_hdr,
                 ),
+                html.Div(id="summary-feature-save-status", className="save-status"),
 
-                html.Div("Yield Summary", className="section-title small"),
-                html.Div(
-                    f"Overall Pass Yield (student_type 1): {pass_yield_str}",
-                    className="summary-yield-avg",
-                ),
-                html.Div("Major Fail Bins (top 5)", className="summary-sub-title"),
+                # ── Yield Summary ─────────────────────────────────────────────
+                html.Div("Yield", className="section-title small"),
                 dash_table.DataTable(
                     id="summary-yield-table",
                     columns=[
-                        {"name": "Rank",              "id": "rank"},
-                        {"name": "Fail Type",         "id": "student_type"},
-                        {"name": "Main Fail Subject", "id": "main_fail_subject"},
-                        {"name": "Fail Ratio",        "id": "fail_ratio"},
-                        {"name": "Comment",           "id": "comment", "editable": True},
+                        {"name": "NO.",                              "id": "no"},
+                        {"name": "Yield",                            "id": "yield"},
+                        {"name": "Major Fail student_type(description, %)", "id": "major_fail"},
+                        {"name": "Comment",                          "id": "comment", "editable": True},
                     ],
                     data=yield_summary_rows,
                     editable=False,
@@ -657,36 +678,42 @@ def register_dash(app):
                     style_table={"overflowX": "auto", "marginBottom": "8px"},
                     style_cell={**_cell, "textAlign": "left"},
                     style_cell_conditional=[
-                        {"if": {"column_id": c}, "textAlign": "center", "width": w}
-                        for c, w in [("rank","48px"),("student_type","80px"),("fail_ratio","90px")]
-                    ] + [
-                        {"if": {"column_id": "main_fail_subject"}, "width": "260px"},
-                        {"if": {"column_id": "comment"}, "width": "320px",
-                         "backgroundColor": "#fffdf3"},
+                        {"if": {"column_id": "no"},    "width": "48px",  "textAlign": "center"},
+                        {"if": {"column_id": "yield"}, "width": "90px",  "textAlign": "center", "fontWeight": 600},
+                        {"if": {"column_id": "major_fail"}, "width": "320px"},
+                        {"if": {"column_id": "comment"},    "width": "300px", "backgroundColor": "#fffdf3"},
+                    ],
+                    style_data_conditional=[
+                        {"if": {"filter_query": '{yield} != ""', "column_id": "yield"},
+                         "borderTop": "2px solid #b8c4d4"},
                     ],
                     style_header=_hdr,
                 ),
                 html.Div(id="summary-yield-save-status", className="save-status"),
 
+                # ── Evaluation Summary ────────────────────────────────────────
                 html.Div("Evaluation Summary", className="section-title small"),
                 dash_table.DataTable(
                     id="summary-eval-table",
                     columns=[
-                        {"name": "Category", "id": "category"},
-                        {"name": "Result",   "id": "result", "editable": True},
+                        {"name": "Category",             "id": "category"},
+                        {"name": "Condition * Judge Limit", "id": "condition_limit", "editable": True},
+                        {"name": "Result",               "id": "result",  "editable": True},
                     ],
                     data=eval_rows,
                     editable=False,
                     sort_action="none",
                     filter_action="none",
-                    style_table={"maxWidth": "640px", "marginBottom": "8px"},
+                    style_table={"overflowX": "auto", "maxWidth": "900px", "marginBottom": "8px"},
                     style_cell={**_cell, "textAlign": "left"},
                     style_cell_conditional=[
                         {"if": {"column_id": "category"},
                          "width": "100px", "fontWeight": 600,
                          "backgroundColor": "#f6f7f9", "textAlign": "center"},
+                        {"if": {"column_id": "condition_limit"},
+                         "width": "360px", "backgroundColor": "#fffdf3"},
                         {"if": {"column_id": "result"},
-                         "width": "520px", "backgroundColor": "#fffdf3"},
+                         "width": "360px", "backgroundColor": "#fffdf3"},
                     ],
                     style_header=_hdr,
                 ),
@@ -990,6 +1017,28 @@ def register_dash(app):
         ], className="distribution-tab")
 
     @dash_app.callback(
+        Output("summary-feature-save-status", "children"),
+        Input("summary-feature-table", "data_timestamp"),
+        State("summary-feature-table", "data"),
+        State("dataset-id", "data"),
+        prevent_initial_call=True,
+    )
+    def save_summary_feature(_ts, data, dataset_id):
+        if not dataset_id or not data:
+            return ""
+        row = data[0]
+        payload = {
+            "subject":       (row.get("subject")       or "").strip(),
+            "customer_type": (row.get("customer_type") or "").strip(),
+            "gd":            (row.get("gd")            or "").strip(),
+            "process":       (row.get("process")       or "").strip(),
+            "line":          (row.get("line")          or "").strip(),
+            "version":       (row.get("version")       or "").strip(),
+        }
+        _write_summary_feature(dataset_id, payload)
+        return "saved"
+
+    @dash_app.callback(
         Output("summary-yield-save-status", "children"),
         Input("summary-yield-table", "data_timestamp"),
         State("summary-yield-table", "data"),
@@ -1001,7 +1050,7 @@ def register_dash(app):
             return ""
         payload = {}
         for row in data:
-            key = str(row.get("student_type", "")).strip()
+            key = str(row.get("_key", "")).strip()
             comment = (row.get("comment") or "").strip()
             if key and comment:
                 payload[key] = comment
@@ -1021,9 +1070,9 @@ def register_dash(app):
         payload = {}
         for row in data:
             cat = (row.get("category") or "").lower()
-            result = (row.get("result") or "").strip()
             if cat:
-                payload[cat] = result
+                payload[cat]            = (row.get("result")          or "").strip()
+                payload[f"{cat}_cond"]  = (row.get("condition_limit") or "").strip()
         _write_summary_eval(dataset_id, payload)
         return "saved"
 
@@ -1443,7 +1492,7 @@ def register_dash(app):
       .section-title.small { margin-top: 18px; font-size: 14px; }
       .fail-table-scroll { border: 1px solid #ddd; border-radius: 6px; overflow-y: auto; max-height: 65vh; }
       .fail-table { width: 100%; overflow: clip; background: #fff; }
-      .fail-row { display: grid; grid-template-columns: 96px 88px 110px 180px minmax(360px, 1fr); border-top: 1px solid #eee; min-height: 92px; background: #fff; }
+      .fail-row { display: grid; grid-template-columns: 66px 62px 76px 180px minmax(360px, 1fr); border-top: 1px solid #eee; min-height: 92px; background: #fff; }
       .fail-row:first-child { border-top: none; }
       .fail-row.header { min-height: 27px; background: #f6f7f9; }
       .fail-table-scroll .fail-row.header { position: sticky; top: 0; z-index: 10; }
