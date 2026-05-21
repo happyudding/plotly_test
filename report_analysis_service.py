@@ -2,22 +2,33 @@ import hashlib
 import json
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import report_db
 import report_s3
+from chart_payload import build_payload
 from config import (
     REPORT_LOCK_MAX_WAIT_SEC,
     REPORT_LOCK_POLL_SEC,
     REPORT_S3_BUCKET,
+    REPORT_THUMB_WORKERS,
 )
 from data_loader import load_table
+from preprocess import cumulative_distribution_full, to_numeric_clean
+from svg_builder import build_subject_svg
 from table_builder import (
     _build_cpk,
     _build_fail_items,
     _build_yield,
     _fail_mask_for_table,
 )
+
+# fail_items / distribution 과 동일한 색상 팔레트 (시각 일관성)
+COLOR_PALETTE = [
+    "#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",
+    "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52",
+]
 
 _CHUNK = 64 * 1024
 
@@ -224,21 +235,77 @@ def _build_issue_table(schools):
     return rows
 
 
+def _idx_or(seq, i, default=None):
+    return seq[i] if i < len(seq) else default
+
+
+def _extract_fail_subject_ids(fail_data):
+    """fail_items JSON에서 실제 차트가 필요한 subject_id 집합만 추출."""
+    ids = set()
+    for row in (fail_data.get("rows") or []):
+        for fs in (row.get("fail_subjects") or []):
+            sid = fs.get("subject_id")
+            if sid is not None:
+                ids.add(int(sid))
+    return ids
+
+
+def _upload_svgs_for_subjects(analysis_key, schools, subject_ids):
+    """지정된 subject_id 목록에 대해서만 SVG를 생성하고 S3에 업로드."""
+    names = list(schools.keys())
+    color_map = {n: COLOR_PALETTE[i % len(COLOR_PALETTE)] for i, n in enumerate(names)}
+    first = schools[names[0]]
+
+    def gen_and_upload(idx):
+        traces = []
+        for name in names:
+            xs, ys = cumulative_distribution_full(
+                to_numeric_clean(schools[name].scores.iloc[:, idx])
+            )
+            traces.append({"school": name, "color": color_map[name], "xs": xs, "ys": ys})
+        unit = _idx_or(first.units, idx, "")
+        lo = _idx_or(first.lo_limits, idx)
+        hi = _idx_or(first.hi_limits, idx)
+        payload = build_payload(idx, first.subjects[idx], unit, lo, hi, traces)
+        svg = build_subject_svg(
+            idx, first.subjects[idx], unit, lo, hi, traces, payload["layout"]
+        )
+        s3_key = report_s3.make_thumb_s3_key(analysis_key, idx)
+        report_s3.upload_bytes_to_s3(s3_key, svg.encode("utf-8"), "image/svg+xml; charset=utf-8")
+
+    if not subject_ids:
+        return
+
+    workers = max(1, int(REPORT_THUMB_WORKERS))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = [ex.submit(gen_and_upload, sid) for sid in subject_ids]
+        for f in as_completed(futures):
+            f.result()
+
+
 def upload_derived_if_absent(analysis_key, content_hash, options_json, file_paths):
-    """fail_items + issue_table → S3 업로드 (이미 있으면 스킵).
+    """fail_items + issue_table + 필요한 SVG 썸네일만 → S3 업로드 (이미 있으면 스킵).
 
     file_paths: list of Path — 분석에 사용된 CSV 파일들 (로컬에 있어야 함).
+
+    SVG는 2000개 전체가 아니라 fail_subjects에 등장하는 subject_id만 생성.
     """
-    need_fail = not report_db.get_object_info(analysis_key, "fail_items")
+    need_fail  = not report_db.get_object_info(analysis_key, "fail_items")
     need_issue = not report_db.get_object_info(analysis_key, "issue_table")
-    if not need_fail and not need_issue:
+    need_thumbs = not report_db.get_object_info(analysis_key, "thumbs_fail_set")
+
+    if not need_fail and not need_issue and not need_thumbs:
         return
 
     file_paths = [Path(p) for p in file_paths]
     schools = {p.stem: load_table(p) for p in sorted(file_paths, key=lambda x: x.name)}
 
-    if need_fail:
+    # fail_items (JSON) — thumbs 생성에도 필요하므로 먼저 빌드
+    fail_data = None
+    if need_fail or need_thumbs:
         fail_data = _build_fail_items(schools)
+
+    if need_fail:
         s3_key = report_s3.make_fail_items_s3_key(analysis_key)
         uri = report_s3.upload_json_to_s3(s3_key, fail_data)
         report_db.upsert_object_info(
@@ -253,6 +320,17 @@ def upload_derived_if_absent(analysis_key, content_hash, options_json, file_path
         report_db.upsert_object_info(
             analysis_key, content_hash, options_json,
             "issue_table", REPORT_S3_BUCKET, s3_key, uri,
+        )
+
+    # SVG 썸네일: fail_subjects에 등장하는 subject_id만 (수십 개)
+    if need_thumbs:
+        fail_subject_ids = _extract_fail_subject_ids(fail_data or {})
+        _upload_svgs_for_subjects(analysis_key, schools, fail_subject_ids)
+        prefix_key = report_s3.make_thumb_prefix_key(analysis_key)
+        report_db.upsert_object_info(
+            analysis_key, content_hash, options_json,
+            "thumbs_fail_set", REPORT_S3_BUCKET,
+            prefix_key, report_s3.make_s3_uri(prefix_key),
         )
 
 

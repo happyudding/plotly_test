@@ -10,6 +10,7 @@ from config import (
     REPORT_S3_PREFIX,
     REPORT_S3_REGION,
     REPORT_S3_SECRET_KEY,
+    REPORT_S3_THUMB_PREFIX,
 )
 
 
@@ -151,3 +152,15 @@ def make_fail_items_s3_key(analysis_key):
 def make_issue_table_s3_key(analysis_key):
     prefix = REPORT_S3_ISSUE_PREFIX.strip("/")
     return f"{prefix}/{analysis_key}.json"
+
+
+# ── per-subject SVG thumbnails ───────────────────────────────────────────────
+
+def make_thumb_s3_key(analysis_key, subject_id):
+    prefix = REPORT_S3_THUMB_PREFIX.strip("/")
+    return f"{prefix}/{analysis_key}/{int(subject_id)}.svg"
+
+
+def make_thumb_prefix_key(analysis_key):
+    prefix = REPORT_S3_THUMB_PREFIX.strip("/")
+    return f"{prefix}/{analysis_key}/"

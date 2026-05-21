@@ -2,15 +2,16 @@ import json
 import re
 import secrets
 import shutil
+import threading
 import time
 from pathlib import Path
 
-from flask import abort, jsonify, request
+from flask import abort, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 import report_db
 import report_s3
-from config import REPORT_UPLOAD_DIR
+from config import INPUT_DIR, ROOT_DIR, REPORT_UPLOAD_DIR, SCHOOL_FILES_GLOB
 from report_analysis_service import (
     AnalysisError,
     AnalysisLockTimeout,
@@ -80,6 +81,7 @@ def analyze():
         abort(400, "no files uploaded")
 
     options = _parse_options(request.form.get("options"))
+    product_type = request.form.get("product_type") or None
 
     session_id = f"{int(time.time())}_{secrets.token_hex(3)}"
     REPORT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -110,6 +112,7 @@ def analyze():
         session_id=session_id,
         file_name=",".join(saved_names),
         file_path=str(session_dir),
+        product_type=product_type,
     )
 
     try:
@@ -125,7 +128,7 @@ def analyze():
 
     analysis_key = result["analysis_key"]
 
-    # S3 업로드 (CSV + derived) 후 로컬 임시 파일 삭제
+    # S3 업로드 (CSV + derived + fail subject 썸네일만) 후 로컬 임시 파일 삭제
     try:
         _upload_csvs_to_s3(saved_paths, analysis_key)
         upload_derived_if_absent(
@@ -195,6 +198,8 @@ def session_full(session_id):
         "csv_files": report_db.get_csv_files(akey) if akey else [],
         "objects": objects,
         "annotations": report_db.get_annotations(session_id),
+        "thumb_url_template": (f"/pe/report/thumb/{akey}/{{subject_id}}"
+                               if akey and "thumbs_fail_set" in objects else None),
     })
 
 
@@ -277,6 +282,27 @@ def get_issue_table(analysis_key):
     return jsonify(payload)
 
 
+# ── per-subject SVG thumbnails ────────────────────────────────────────────────
+
+@report_bp.get("/thumb/<analysis_key>/<int:sid>")
+def get_thumb(analysis_key, sid):
+    """과목별 SVG 썸네일을 S3에서 받아 반환. fail_items HTML이 <img>로 참조."""
+    from flask import Response
+    _validate_analysis_key(analysis_key)
+    s3_key = report_s3.make_thumb_s3_key(analysis_key, sid)
+    try:
+        data = report_s3.download_bytes_from_s3(s3_key)
+    except S3NotConfigured as exc:
+        return jsonify({"error": f"S3 not configured: {exc}"}), 503
+    except Exception:
+        abort(404, "thumbnail not found")
+    return Response(
+        data,
+        mimetype="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
+
+
 # ── annotations ───────────────────────────────────────────────────────────────
 
 @report_bp.post("/annotation")
@@ -313,3 +339,107 @@ def update_annotation(aid):
 def delete_annotation(aid):
     report_db.delete_annotation(aid)
     return jsonify({"id": aid, "deleted": True})
+
+
+# ── Report Analysis index / view pages ───────────────────────────────────────
+
+@report_bp.get("/")
+def index_page():
+    return send_file(ROOT_DIR / "report_analysis_index.html")
+
+
+@report_bp.get("/view/<session_id>")
+def view_page(session_id):
+    _validate_session_id(session_id)
+    return send_file(ROOT_DIR / "report_view.html")
+
+
+@report_bp.get("/api/history")
+def history():
+    product_type = request.args.get("product_type") or None
+    process = request.args.get("process") or None
+    product = request.args.get("product") or None
+    revision = request.args.get("revision") or None
+    rows = report_db.get_history(
+        product_type=product_type,
+        process=process,
+        product=product,
+        revision=revision,
+    )
+    return jsonify(rows)
+
+
+@report_bp.post("/execute-debug")
+def execute_debug():
+    """로컬 디버그 CSV(a~c_school_updated_call.csv)로 전체 파이프라인 실행.
+    cumulative dashboard 빌드 + report analysis DB/S3 저장을 동시 수행."""
+    from dataset_builder import build_dataset
+    from server import _build_lock, _build_status
+
+    if request.is_json:
+        body = request.get_json(silent=True, force=True) or {}
+        product_type = body.get("product_type") or None
+    else:
+        product_type = request.form.get("product_type") or None
+
+    debug_files = sorted(INPUT_DIR.glob(SCHOOL_FILES_GLOB))
+    if not debug_files:
+        abort(400, f"디버그 CSV 파일을 찾을 수 없음: {INPUT_DIR}/{SCHOOL_FILES_GLOB}")
+
+    dataset_id = f"{int(time.time())}_{secrets.token_hex(3)}"
+    session_id = f"{int(time.time())}_{secrets.token_hex(3)}"
+    inputs = {p.name: p for p in debug_files}
+    file_names = ",".join(p.name for p in debug_files)
+
+    report_db.create_session(
+        session_id=session_id,
+        file_name=file_names,
+        file_path=str(INPUT_DIR),
+        product_type=product_type,
+        dataset_id=dataset_id,
+    )
+
+    def _set_status(s):
+        with _build_lock:
+            _build_status[s["dataset_id"]] = s
+
+    def _bg():
+        # 1. cumulative dashboard 빌드
+        try:
+            _set_status({"dataset_id": dataset_id, "stage": "queued", "current": 0, "total": 0, "elapsed_s": 0})
+            r = build_dataset(dataset_id, inputs, progress_cb=_set_status)
+            _set_status({
+                "dataset_id": dataset_id, "stage": "done",
+                "current": r["n_subjects"], "total": r["n_subjects"],
+                "elapsed_s": r["elapsed_s"],
+            })
+        except Exception as exc:
+            _set_status({"dataset_id": dataset_id, "stage": "error", "error": str(exc)})
+
+        # 2. report analysis (통계 요약, fail items, issue table → DB + S3)
+        try:
+            result = get_or_compute_analysis(session_id, debug_files, {})
+            analysis_key = result["analysis_key"]
+            try:
+                _upload_csvs_to_s3(debug_files, analysis_key)
+                upload_derived_if_absent(
+                    analysis_key, result["content_hash"], result["options_json"], debug_files,
+                )
+            except S3NotConfigured:
+                pass
+            except Exception:
+                pass
+        except AnalysisLockTimeout as exc:
+            report_db.update_session(session_id, status="failed", error_message=str(exc)[:500])
+            return
+        except (AnalysisError, Exception) as exc:
+            report_db.update_session(session_id, status="failed", error_message=str(exc)[:500])
+            return
+
+    threading.Thread(target=_bg, daemon=True).start()
+
+    return jsonify({
+        "session_id": session_id,
+        "dataset_id": dataset_id,
+        "view_url": f"/view/{dataset_id}",
+    })

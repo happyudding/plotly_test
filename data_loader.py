@@ -6,6 +6,7 @@ from config import (
     HI_LIMIT_ROW, LO_LIMIT_ROW, META_COLUMNS, N_META_COLUMNS,
     STUDENT_DATA_START_ROW, SUBJECT_NAME_ROW, UNIT_ROW,
 )
+from file_handling import csvfile_to_df
 
 
 @dataclass
@@ -19,8 +20,7 @@ class ExcelData:
 
 
 def load_table(path):
-    reader = pd.read_csv if path.suffix.lower() == ".csv" else pd.read_excel
-    raw = reader(path, header=None)
+    raw = csvfile_to_df(path)
     row = lambda r: raw.iloc[r, N_META_COLUMNS:]
     subjects = [str(s) for s in row(SUBJECT_NAME_ROW).tolist()]
     units = [str(u) if pd.notna(u) else "" for u in row(UNIT_ROW).tolist()]

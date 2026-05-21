@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Report Analysis</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f0f2f5; margin: 0; padding: 24px 20px;
+  color: #222;
+}
+h1 { margin: 0 0 20px; font-size: 22px; font-weight: 700; color: #1a1a2e; }
+
+/* ── product type + execute bar ── */
+.top-bar {
+  display: flex; align-items: center; gap: 12px;
+  background: #fff; border-radius: 10px; padding: 16px 20px;
+  box-shadow: 0 1px 6px rgba(0,0,0,.07); margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.pt-btn {
+  flex: 0 0 100px; height: 64px; border: 2px solid #d0d5dd;
+  border-radius: 10px; background: #fff; cursor: pointer;
+  font-size: 20px; font-weight: 700; color: #555;
+  transition: all .15s;
+}
+.pt-btn:hover { border-color: #4a90e2; color: #4a90e2; background: #f0f6ff; }
+.pt-btn.active {
+  border-color: #4a90e2; background: #4a90e2; color: #fff;
+  box-shadow: 0 2px 8px rgba(74,144,226,.35);
+}
+.spacer { flex: 1; }
+.execute-wrap { display: flex; align-items: center; gap: 10px; }
+.btn-execute {
+  height: 46px; padding: 0 22px; border-radius: 8px;
+  background: #22c55e; color: #fff; border: none;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  transition: background .15s;
+}
+.btn-execute:hover { background: #16a34a; }
+.btn-execute:disabled { background: #9ca3af; cursor: not-allowed; }
+.btn-execute .spinner {
+  display: none; width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+  border-radius: 50%; animation: spin .6s linear infinite;
+}
+.btn-execute.loading .spinner { display: block; }
+.btn-execute.loading .btn-label { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.selected-files {
+  font-size: 12px; color: #666; max-width: 260px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── filter box ── */
+.filter-card {
+  background: #fff; border-radius: 10px; padding: 16px 20px;
+  box-shadow: 0 1px 6px rgba(0,0,0,.07); margin-bottom: 16px;
+  display: flex; align-items: flex-start; gap: 16px;
+}
+.filter-body { flex: 1; }
+.filter-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.filter-row:last-child { margin-bottom: 0; }
+.filter-label {
+  width: 72px; font-size: 12px; font-weight: 600;
+  color: #888; flex-shrink: 0;
+}
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill {
+  padding: 3px 12px; border-radius: 20px; border: 1px solid #d0d5dd;
+  background: #fff; font-size: 12px; cursor: pointer; color: #555;
+  transition: all .12s;
+}
+.pill:hover { border-color: #4a90e2; color: #4a90e2; }
+.pill.active { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+.filter-actions {
+  display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
+}
+.btn-action {
+  padding: 7px 18px; border-radius: 6px; border: 1px solid #d0d5dd;
+  background: #fff; font-size: 13px; cursor: pointer; color: #333;
+  font-weight: 500; transition: all .12s; white-space: nowrap;
+}
+.btn-action:hover { background: #f0f6ff; border-color: #4a90e2; color: #4a90e2; }
+.btn-action.primary {
+  background: #4a90e2; color: #fff; border-color: #4a90e2;
+}
+.btn-action.primary:hover { background: #3a7cc5; }
+
+/* ── results table ── */
+.results-card {
+  background: #fff; border-radius: 10px; padding: 0;
+  box-shadow: 0 1px 6px rgba(0,0,0,.07); overflow: hidden;
+}
+.results-header {
+  padding: 14px 20px; border-bottom: 1px solid #e8eaed;
+  font-size: 14px; font-weight: 600; color: #333;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.results-count { font-size: 12px; color: #888; font-weight: 400; }
+table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+thead th {
+  background: #f8f9fb; padding: 10px 14px;
+  text-align: left; font-weight: 600; color: #555;
+  border-bottom: 1px solid #e8eaed; white-space: nowrap;
+}
+tbody tr {
+  border-bottom: 1px solid #f0f2f5; cursor: pointer;
+  transition: background .1s;
+}
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: #f0f6ff; }
+tbody td { padding: 10px 14px; color: #333; }
+.td-filename { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge {
+  display: inline-block; padding: 2px 10px; border-radius: 12px;
+  font-size: 11px; font-weight: 600;
+}
+.badge-A { background: #dbeafe; color: #1d4ed8; }
+.badge-B { background: #dcfce7; color: #15803d; }
+.badge-C { background: #fef9c3; color: #854d0e; }
+.badge-D { background: #fce7f3; color: #9d174d; }
+.empty-row td { text-align: center; color: #aaa; padding: 40px; }
+
+/* toast */
+.toast {
+  position: fixed; bottom: 24px; right: 24px;
+  background: #1a1a2e; color: #fff; padding: 12px 20px;
+  border-radius: 8px; font-size: 13px; opacity: 0;
+  transition: opacity .3s; pointer-events: none; z-index: 999;
+}
+.toast.show { opacity: 1; }
+.toast.error { background: #dc2626; }
+</style>
+</head>
+<body>
+
+<h1>Report Analysis</h1>
+
+<!-- product type + execute -->
+<div class="top-bar">
+  <button class="pt-btn" data-pt="A">A</button>
+  <button class="pt-btn" data-pt="B">B</button>
+  <button class="pt-btn" data-pt="C">C</button>
+  <button class="pt-btn" data-pt="D">D</button>
+  <div class="spacer"></div>
+  <div class="execute-wrap">
+    <button class="btn-execute" id="executeBtn" disabled>
+      <div class="spinner"></div>
+      <span class="btn-label">▶ Execute</span>
+    </button>
+  </div>
+</div>
+
+<!-- filter -->
+<div class="filter-card">
+  <div class="filter-body">
+    <div class="filter-row">
+      <span class="filter-label">Process</span>
+      <div class="pills" id="processPills">
+        <span class="pill active" data-filter="process" data-val="">All</span>
+      </div>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">Product</span>
+      <div class="pills" id="productPills">
+        <span class="pill active" data-filter="product" data-val="">All Product</span>
+      </div>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">Revision</span>
+      <div class="pills" id="revisionPills">
+        <span class="pill active" data-filter="revision" data-val="">All EVT</span>
+      </div>
+    </div>
+  </div>
+  <div class="filter-actions">
+    <button class="btn-action primary" id="searchBtn">조회</button>
+    <button class="btn-action" id="uploadBtn">업로드</button>
+    <button class="btn-action" id="downloadBtn">다운로드</button>
+  </div>
+</div>
+
+<!-- results -->
+<div class="results-card">
+  <div class="results-header">
+    검색결과
+    <span class="results-count" id="resultsCount"></span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>파일명</th>
+        <th>Product Type</th>
+        <th>Process</th>
+        <th>Product</th>
+        <th>Revision</th>
+        <th>업로드날짜</th>
+        <th>크기</th>
+      </tr>
+    </thead>
+    <tbody id="resultsTbody">
+      <tr class="empty-row"><td colspan="7">데이터를 불러오는 중...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const state = {
+  productType: null,
+  process: null,
+  product: null,
+  revision: null,
+};
+
+// ── product type buttons ──────────────────────────────────────────────────────
+document.querySelectorAll(".pt-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const pt = btn.dataset.pt;
+    if (state.productType === pt) {
+      state.productType = null;
+      btn.classList.remove("active");
+    } else {
+      document.querySelectorAll(".pt-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      state.productType = pt;
+    }
+    updateExecuteBtn();
+    loadHistory();
+  });
+});
+
+// ── execute button ────────────────────────────────────────────────────────────
+const executeBtn = document.getElementById("executeBtn");
+
+function updateExecuteBtn() {
+  executeBtn.disabled = !state.productType;
+}
+
+executeBtn.addEventListener("click", runExecute);
+
+async function runExecute() {
+  if (executeBtn.classList.contains("loading")) return;
+  if (!state.productType) { showToast("Product Type(A~D)을 먼저 선택하세요.", true); return; }
+
+  executeBtn.classList.add("loading");
+  executeBtn.disabled = true;
+
+  const fd = new FormData();
+  fd.append("product_type", state.productType);
+
+  try {
+    const res = await fetch("/pe/report/execute-debug", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    showToast(`빌드 시작: ${data.session_id}`);
+    window.open("/pe/report/view/" + data.session_id, "_blank");
+    // 잠시 후 검색결과 갱신 (세션이 DB에 쌓일 시간 확보)
+    setTimeout(loadHistory, 800);
+  } catch (e) {
+    showToast(e.message, true);
+  } finally {
+    executeBtn.classList.remove("loading");
+    updateExecuteBtn();
+  }
+}
+
+// ── filter pills ──────────────────────────────────────────────────────────────
+document.querySelectorAll(".pill").forEach(pill => {
+  pill.addEventListener("click", () => {
+    const filterKey = pill.dataset.filter;
+    const val = pill.dataset.val;
+    const container = pill.closest(".pills");
+    container.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+    pill.classList.add("active");
+    state[filterKey] = val || null;
+  });
+});
+
+// ── action buttons ────────────────────────────────────────────────────────────
+document.getElementById("searchBtn").addEventListener("click", loadHistory);
+
+document.getElementById("uploadBtn").addEventListener("click", runExecute);
+
+document.getElementById("downloadBtn").addEventListener("click", downloadCSV);
+
+// ── history API ───────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const params = new URLSearchParams();
+  if (state.productType) params.set("product_type", state.productType);
+  if (state.process)     params.set("process", state.process);
+  if (state.product)     params.set("product", state.product);
+  if (state.revision)    params.set("revision", state.revision);
+
+  try {
+    const res = await fetch("/pe/report/api/history?" + params);
+    const rows = await res.json();
+    renderTable(rows);
+    updateFilterPills(rows);
+  } catch (e) {
+    showToast("목록 조회 실패: " + e.message, true);
+  }
+}
+
+let _lastRows = [];
+
+function renderTable(rows) {
+  _lastRows = rows;
+  const tbody = document.getElementById("resultsTbody");
+  document.getElementById("resultsCount").textContent = `총 ${rows.length}건`;
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">검색 결과가 없습니다.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    const pt = r.product_type || "-";
+    const badgeCls = "badge badge-" + (["A","B","C","D"].includes(pt) ? pt : "A");
+    const date = r.created_at ? new Date(r.created_at * 1000).toLocaleString("ko-KR") : "-";
+    const size = r.total_file_size ? formatSize(r.total_file_size) : "-";
+    return `<tr data-session="${escHtml(r.session_id)}" data-dataset="${escHtml(r.dataset_id || '')}">
+      <td class="td-filename" title="${escHtml(r.file_name || '')}">${escHtml(r.file_name || '-')}</td>
+      <td><span class="${badgeCls}">${escHtml(pt)}</span></td>
+      <td>${escHtml(r.process || '-')}</td>
+      <td>${escHtml(r.product || '-')}</td>
+      <td>${escHtml(r.revision || '-')}</td>
+      <td>${date}</td>
+      <td>${size}</td>
+    </tr>`;
+  }).join("");
+
+  tbody.querySelectorAll("tr[data-session]").forEach(tr => {
+    tr.addEventListener("click", () => {
+      window.location.href = "/pe/report/view/" + tr.dataset.session;
+    });
+  });
+}
+
+function updateFilterPills(rows) {
+  const unique = key => [...new Set(rows.map(r => r[key]).filter(Boolean))].sort();
+  buildPills("processPills",  "process",  unique("process"),  "All");
+  buildPills("productPills",  "product",  unique("product"),  "All Product");
+  buildPills("revisionPills", "revision", unique("revision"), "All EVT");
+}
+
+function buildPills(containerId, filterKey, values, allLabel) {
+  const container = document.getElementById(containerId);
+  const current = state[filterKey];
+  container.innerHTML = `<span class="pill ${!current ? 'active' : ''}" data-filter="${filterKey}" data-val="">${allLabel}</span>`;
+  values.forEach(v => {
+    const pill = document.createElement("span");
+    pill.className = "pill" + (current === v ? " active" : "");
+    pill.dataset.filter = filterKey;
+    pill.dataset.val = v;
+    pill.textContent = v;
+    container.appendChild(pill);
+  });
+  container.querySelectorAll(".pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+      container.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+      pill.classList.add("active");
+      state[filterKey] = pill.dataset.val || null;
+    });
+  });
+}
+
+// ── download CSV ──────────────────────────────────────────────────────────────
+function downloadCSV() {
+  if (!_lastRows.length) { showToast("다운로드할 데이터가 없습니다.", true); return; }
+  const header = ["파일명", "ProductType", "Process", "Product", "Revision", "업로드날짜", "크기(bytes)"];
+  const lines = [header.join(",")];
+  _lastRows.forEach(r => {
+    const date = r.created_at ? new Date(r.created_at * 1000).toLocaleString("ko-KR") : "";
+    lines.push([r.file_name, r.product_type, r.process, r.product, r.revision, date, r.total_file_size]
+      .map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
+  });
+  const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "report_history.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── utils ─────────────────────────────────────────────────────────────────────
+function formatSize(bytes) {
+  if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return bytes + " B";
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+let _toastTimer;
+function showToast(msg, isError = false) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "toast show" + (isError ? " error" : "");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+// ── init ──────────────────────────────────────────────────────────────────────
+loadHistory();
+</script>
+</body>
+</html>

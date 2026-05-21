@@ -36,10 +36,14 @@ REPORT_S3_BUCKET = os.getenv("REPORT_S3_BUCKET", "")
 REPORT_S3_REGION = os.getenv("REPORT_S3_REGION", "us-east-1")
 REPORT_S3_ACCESS_KEY = os.getenv("REPORT_S3_ACCESS_KEY", "")
 REPORT_S3_SECRET_KEY = os.getenv("REPORT_S3_SECRET_KEY", "")
-REPORT_S3_PREFIX      = os.getenv("REPORT_S3_PREFIX",      "pe/report/plotly")
-REPORT_S3_CSV_PREFIX  = os.getenv("REPORT_S3_CSV_PREFIX",  "pe/report/origin_csv_files")
-REPORT_S3_FAIL_PREFIX = os.getenv("REPORT_S3_FAIL_PREFIX", "pe/report/fail_items")
-REPORT_S3_ISSUE_PREFIX= os.getenv("REPORT_S3_ISSUE_PREFIX","pe/report/issue_table")
+REPORT_S3_PREFIX       = os.getenv("REPORT_S3_PREFIX",       "pe/report/plotly")
+REPORT_S3_CSV_PREFIX   = os.getenv("REPORT_S3_CSV_PREFIX",   "pe/report/origin_csv_files")
+REPORT_S3_FAIL_PREFIX  = os.getenv("REPORT_S3_FAIL_PREFIX",  "pe/report/fail_items")
+REPORT_S3_ISSUE_PREFIX = os.getenv("REPORT_S3_ISSUE_PREFIX", "pe/report/issue_table")
+REPORT_S3_THUMB_PREFIX = os.getenv("REPORT_S3_THUMB_PREFIX", "pe/report/thumbs")
+
+# SVG thumbnail upload concurrency (분석 1회당 2000장 정도 업로드)
+REPORT_THUMB_WORKERS   = int(os.getenv("REPORT_THUMB_WORKERS", "8"))
 
 REPORT_LOCK_TTL_SEC = 300
 REPORT_LOCK_POLL_SEC = 0.5

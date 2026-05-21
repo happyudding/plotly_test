@@ -133,6 +133,13 @@ def _migrate(conn):
         """)
         conn.execute("DROP TABLE _report_object_info_old")
 
+    # report_session: product_type, process, product, revision, dataset_id 컬럼 추가
+    sess_info = conn.execute("PRAGMA table_info(report_session)").fetchall()
+    sess_cols = {r[1] for r in sess_info}
+    for col in ("product_type", "process", "product", "revision", "dataset_id"):
+        if col not in sess_cols:
+            conn.execute(f"ALTER TABLE report_session ADD COLUMN {col} TEXT")
+
 
 def init_report_db():
     REPORT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -163,13 +170,14 @@ def _row(row):
 
 # ── session ─────────────────────────────────────────────────────────────────
 
-def create_session(session_id, file_name, file_path):
+def create_session(session_id, file_name, file_path, product_type=None, dataset_id=None):
     now = _now()
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO report_session (session_id, file_name, file_path, status, created_at, updated_at) "
-            "VALUES (?, ?, ?, 'pending', ?, ?)",
-            (session_id, file_name, str(file_path), now, now),
+            "INSERT INTO report_session "
+            "(session_id, file_name, file_path, product_type, dataset_id, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+            (session_id, file_name, str(file_path), product_type, dataset_id, now, now),
         )
 
 
@@ -192,6 +200,39 @@ def get_session(session_id):
             "SELECT * FROM report_session WHERE session_id=?", (session_id,)
         ).fetchone()
     return _row(row)
+
+
+def get_history(product_type=None, process=None, product=None, revision=None, limit=200):
+    conditions = ["s.status IN ('done', 'reused')"]
+    params = []
+    if product_type:
+        conditions.append("s.product_type = ?")
+        params.append(product_type)
+    if process:
+        conditions.append("s.process = ?")
+        params.append(process)
+    if product:
+        conditions.append("s.product = ?")
+        params.append(product)
+    if revision:
+        conditions.append("s.revision = ?")
+        params.append(revision)
+    where = " AND ".join(conditions)
+    params.append(limit)
+    sql = f"""
+        SELECT s.session_id, s.file_name, s.product_type, s.process, s.product,
+               s.revision, s.created_at, s.status, s.dataset_id,
+               COALESCE(SUM(c.file_size), 0) AS total_file_size
+        FROM report_session s
+        LEFT JOIN report_csv_files c ON c.analysis_key = s.analysis_key
+        WHERE {where}
+        GROUP BY s.session_id
+        ORDER BY s.created_at DESC
+        LIMIT ?
+    """
+    with get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_session_path_by_analysis_key(analysis_key):
