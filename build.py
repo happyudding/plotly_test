@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 from dataset_builder import build_dataset
+from config import SERVER_BASE_URL
 
 
 # 빌드에 사용할 입력 CSV 절대경로 리스트.
@@ -40,8 +41,8 @@ def main():
             print(f"  - {key}: {value}s")
     if "chart_bytes" in r and "svg_bytes" in r:
         print(f"Sizes: charts={r['chart_bytes'] / 1024 / 1024:.2f} MB, thumbs={r['svg_bytes'] / 1024 / 1024:.2f} MB")
-    print(f"View at: http://127.0.0.1:8000/view/{dataset_id}")
-    print(f"Dash at: http://127.0.0.1:8000/dash/{dataset_id}")
+    print(f"View at: {SERVER_BASE_URL}/view/{dataset_id}")
+    print(f"Dash at: {SERVER_BASE_URL}/dash/{dataset_id}")
 
 
 if __name__ == "__main__":

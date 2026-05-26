@@ -117,45 +117,60 @@ def _now():
     return int(time.time())
 
 
-def _migrate(conn):
-    """report_object_info: analysis_key が PK → (analysis_key, object_type) UNIQUE に移行."""
-    info = conn.execute("PRAGMA table_info(report_object_info)").fetchall()
-    col_names = [r[1] for r in info]
-    if "id" not in col_names:
-        conn.execute("ALTER TABLE report_object_info RENAME TO _report_object_info_old")
-        conn.execute("""
-            CREATE TABLE report_object_info (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                analysis_key  TEXT NOT NULL,
-                object_type   TEXT NOT NULL,
-                content_hash  TEXT NOT NULL,
-                options_json  TEXT NOT NULL,
-                s3_bucket     TEXT,
-                s3_key        TEXT NOT NULL,
-                s3_uri        TEXT,
-                created_at    INTEGER NOT NULL,
-                last_accessed INTEGER,
-                UNIQUE(analysis_key, object_type)
-            )
-        """)
-        conn.execute("""
-            INSERT INTO report_object_info
-                (analysis_key, object_type, content_hash, options_json,
-                 s3_bucket, s3_key, s3_uri, created_at, last_accessed)
-            SELECT analysis_key, object_type, content_hash, options_json,
-                   s3_bucket, s3_key, s3_uri, created_at, last_accessed
-            FROM _report_object_info_old
-        """)
-        conn.execute("DROP TABLE _report_object_info_old")
+def _table_exists(conn, name):
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone()
+    return row is not None
 
-    # report_session: product_type, process, product, revision, dataset_id 컬럼 추가
-    sess_info = conn.execute("PRAGMA table_info(report_session)").fetchall()
-    sess_cols = {r[1] for r in sess_info}
-    for col in ("product_type", "process", "product", "revision", "dataset_id", "lot_id", "password"):
-        if col not in sess_cols:
-            conn.execute(f"ALTER TABLE report_session ADD COLUMN {col} TEXT")
-    if "is_debug" not in sess_cols:
-        conn.execute("ALTER TABLE report_session ADD COLUMN is_debug INTEGER DEFAULT 0")
+
+def _migrate(conn):
+    """기존 DB 스키마 업그레이드. 빈 DB(테이블 없음) 에서는 no-op — SCHEMA 가 새로 만든다."""
+
+    # report_object_info: 옛 (analysis_key PK) → (id PK + UNIQUE(analysis_key, object_type))
+    if _table_exists(conn, "report_object_info"):
+        info = conn.execute("PRAGMA table_info(report_object_info)").fetchall()
+        col_names = [r[1] for r in info]
+        if col_names and "id" not in col_names:
+            conn.execute("ALTER TABLE report_object_info RENAME TO _report_object_info_old")
+            conn.execute("""
+                CREATE TABLE report_object_info (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    analysis_key  TEXT NOT NULL,
+                    object_type   TEXT NOT NULL,
+                    content_hash  TEXT NOT NULL,
+                    options_json  TEXT NOT NULL,
+                    s3_bucket     TEXT,
+                    s3_key        TEXT NOT NULL,
+                    s3_uri        TEXT,
+                    created_at    INTEGER NOT NULL,
+                    last_accessed INTEGER,
+                    UNIQUE(analysis_key, object_type)
+                )
+            """)
+            conn.execute("""
+                INSERT INTO report_object_info
+                    (analysis_key, object_type, content_hash, options_json,
+                     s3_bucket, s3_key, s3_uri, created_at, last_accessed)
+                SELECT analysis_key, object_type, content_hash, options_json,
+                       s3_bucket, s3_key, s3_uri, created_at, last_accessed
+                FROM _report_object_info_old
+            """)
+            conn.execute("DROP TABLE _report_object_info_old")
+
+    # report_session: 추가 컬럼들
+    if _table_exists(conn, "report_session"):
+        sess_info = conn.execute("PRAGMA table_info(report_session)").fetchall()
+        sess_cols = {r[1] for r in sess_info}
+        for col in (
+            "analysis_key", "content_hash", "error_message",
+            "product_type", "process", "product", "revision",
+            "dataset_id", "lot_id", "password",
+        ):
+            if col not in sess_cols:
+                conn.execute(f"ALTER TABLE report_session ADD COLUMN {col} TEXT")
+        if "is_debug" not in sess_cols:
+            conn.execute("ALTER TABLE report_session ADD COLUMN is_debug INTEGER DEFAULT 0")
 
 
 def init_report_db():

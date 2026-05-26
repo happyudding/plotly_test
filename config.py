@@ -2,11 +2,18 @@ import os
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
-INPUT_DIR = ROOT_DIR / "data"
-OUTPUT_DIR = ROOT_DIR / "output"
-DATASETS_DIR = OUTPUT_DIR / "datasets"
+
+
+def _path_env(name, default):
+    v = os.getenv(name)
+    return Path(v).expanduser().resolve() if v else default
+
+
+INPUT_DIR = _path_env("PLOTLY_INPUT_DIR", ROOT_DIR / "data")
+OUTPUT_DIR = _path_env("PLOTLY_OUTPUT_DIR", ROOT_DIR / "output")
+DATASETS_DIR = _path_env("PLOTLY_DATASETS_DIR", OUTPUT_DIR / "datasets")
 UPLOAD_FORM_PATH = ROOT_DIR / "upload_form.html"
-SCHOOL_FILES_GLOB = "*_school_renamed.csv"
+SCHOOL_FILES_GLOB = os.getenv("SCHOOL_FILES_GLOB", "*_school_renamed.csv")
 
 META_COLUMNS = ["DUT", "XCoord", "YCoord", "Bin"]
 N_META_COLUMNS = len(META_COLUMNS)
@@ -16,8 +23,11 @@ DATA_START_ROW = 6
 
 COLS_PER_ROW = 5
 
-# Base URL of the running Flask server (used for hyperlinks in exported XLSX)
-SERVER_BASE_URL = "http://127.0.0.1:5000"
+# Base URL of the running Flask server (used for hyperlinks in exported XLSX).
+# HOST/PORT 환경변수가 있으면 자동으로 맞추고, 그 외에는 SERVER_BASE_URL 환경변수로 직접 지정 가능.
+_HOST = os.getenv("HOST", "127.0.0.1")
+_PORT = os.getenv("PORT", "8000")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", f"http://{_HOST}:{_PORT}")
 CELL_ASPECT_W, CELL_ASPECT_H = 16, 11
 
 LINE_COLOR = "royalblue"
@@ -28,8 +38,8 @@ X_RANGE_PADDING_RATIO = 0.15
 TITLE_FONT_SIZE = 11
 
 # Report module (/pe/report) ------------------------------------------------
-REPORT_DB_PATH = ROOT_DIR / "DB" / "pe" / "report" / "report.db"
-REPORT_UPLOAD_DIR = ROOT_DIR / "uploads" / "report"
+REPORT_DB_PATH = _path_env("REPORT_DB_PATH", ROOT_DIR / "DB" / "pe" / "report" / "report.db")
+REPORT_UPLOAD_DIR = _path_env("REPORT_UPLOAD_DIR", ROOT_DIR / "uploads" / "report")
 
 REPORT_S3_ENDPOINT = os.getenv("REPORT_S3_ENDPOINT", "")
 REPORT_S3_BUCKET = os.getenv("REPORT_S3_BUCKET", "")

@@ -83,7 +83,12 @@ def view(id):
         abort(400)
     if (DATASETS_DIR / id / "cumulative.html").exists():
         return _send(id, "cumulative.html")
-    return _placeholder_html(id), 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache"}
+    # 빌드가 진행 중이면 placeholder 가 폴링하도록, 아니면 업로드 페이지로 보낸다.
+    with _build_lock:
+        in_progress = _build_status.get(id, {}).get("stage") in ("queued", "save_inputs", "load_csv", "table_json", "cdf_svg", "write_page")
+    if in_progress:
+        return _placeholder_html(id), 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache"}
+    return redirect("/pe/report/", code=302)
 
 
 @bp.get("/api/<id>/chart/<int:sid>")
