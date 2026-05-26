@@ -82,6 +82,9 @@ def analyze():
 
     options = _parse_options(request.form.get("options"))
     product_type = request.form.get("product_type") or None
+    password = (request.form.get("password") or "").strip() or None
+    if password and not re.match(r"^\d{4}$", password):
+        abort(400, "password must be exactly 4 digits")
 
     session_id = f"{int(time.time())}_{secrets.token_hex(3)}"
     REPORT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -113,6 +116,7 @@ def analyze():
         file_name=",".join(saved_names),
         file_path=str(session_dir),
         product_type=product_type,
+        password=password,
     )
 
     try:
@@ -367,6 +371,7 @@ def debug_analyze_only():
         file_name=",".join(p.name for p in debug_files),
         file_path=str(INPUT_DIR),
         product_type=None,
+        is_debug=1,
     )
     try:
         result = get_or_compute_analysis(session_id, debug_files, {})
@@ -418,6 +423,22 @@ def history():
     return jsonify(rows)
 
 
+@report_bp.delete("/session/<session_id>")
+def delete_session_route(session_id):
+    _validate_session_id(session_id)
+    body = request.get_json(force=True, silent=True) or {}
+    password = (body.get("password") or "").strip()
+    session = report_db.get_session(session_id)
+    if not session:
+        abort(404, "session not found")
+    stored_password = session.get("password")
+    if stored_password:
+        if password != stored_password:
+            return jsonify({"error": "비밀번호가 일치하지 않습니다."}), 403
+    report_db.delete_session(session_id)
+    return jsonify({"deleted": True, "session_id": session_id})
+
+
 @report_bp.post("/execute-debug")
 def execute_debug():
     """로컬 디버그 CSV(a~c_school_updated_call.csv)로 전체 파이프라인 실행.
@@ -428,8 +449,12 @@ def execute_debug():
     if request.is_json:
         body = request.get_json(silent=True, force=True) or {}
         product_type = body.get("product_type") or None
+        password = (body.get("password") or "").strip() or None
     else:
         product_type = request.form.get("product_type") or None
+        password = (request.form.get("password") or "").strip() or None
+    if password and not re.match(r"^\d{4}$", password):
+        abort(400, "password must be exactly 4 digits")
 
     debug_files = sorted(INPUT_DIR.glob(SCHOOL_FILES_GLOB))
     if not debug_files:
@@ -446,6 +471,8 @@ def execute_debug():
         file_path=str(INPUT_DIR),
         product_type=product_type,
         dataset_id=dataset_id,
+        password=password,
+        is_debug=1,
     )
 
     def _set_status(s):

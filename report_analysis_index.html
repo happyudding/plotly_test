@@ -148,7 +148,18 @@ tbody td { padding: 10px 14px; color: #333; }
 .badge-PM { background: #fef9c3; color: #854d0e; }
 .badge-SE { background: #fce7f3; color: #9d174d; }
 .badge-X  { background: #e5e7eb; color: #555; }
+.badge-debug { background: #fff3cd; color: #856404; }
 .empty-row td { text-align: center; color: #aaa; padding: 40px; }
+
+/* delete button in table */
+.btn-del {
+  width: 28px; height: 28px; border-radius: 6px;
+  border: 1px solid #fca5a5; background: #fff5f5;
+  color: #ef4444; cursor: pointer; font-size: 13px;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all .12s;
+}
+.btn-del:hover { background: #fee2e2; border-color: #ef4444; }
 
 /* ── pagination ── */
 .pager {
@@ -175,6 +186,54 @@ tbody td { padding: 10px 14px; color: #333; }
 }
 .toast.show { opacity: 1; }
 .toast.error { background: #dc2626; }
+
+/* ── modal ── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000; opacity: 0; pointer-events: none;
+  transition: opacity .2s;
+}
+.modal-overlay.open { opacity: 1; pointer-events: all; }
+.modal-box {
+  background: #fff; border-radius: 14px; padding: 28px 28px 24px;
+  width: 340px; box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  transform: translateY(-10px); transition: transform .2s;
+}
+.modal-overlay.open .modal-box { transform: translateY(0); }
+.modal-title {
+  font-size: 16px; font-weight: 700; color: #1a1a2e; margin: 0 0 6px;
+}
+.modal-desc {
+  font-size: 13px; color: #666; margin: 0 0 20px; line-height: 1.5;
+}
+.pin-row {
+  display: flex; gap: 10px; justify-content: center; margin-bottom: 24px;
+}
+.pin-cell {
+  width: 52px; height: 60px; border: 2px solid #d0d5dd; border-radius: 10px;
+  font-size: 24px; font-weight: 700; text-align: center;
+  outline: none; color: #1a1a2e; transition: border-color .12s;
+  -moz-appearance: textfield;
+}
+.pin-cell::-webkit-outer-spin-button,
+.pin-cell::-webkit-inner-spin-button { -webkit-appearance: none; }
+.pin-cell:focus { border-color: #4a90e2; }
+.modal-actions {
+  display: flex; gap: 10px; justify-content: flex-end;
+}
+.modal-btn {
+  height: 38px; padding: 0 20px; border-radius: 7px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 1px solid #d0d5dd; background: #fff; color: #333;
+  transition: all .12s;
+}
+.modal-btn:hover { background: #f0f2f5; }
+.modal-btn.confirm { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+.modal-btn.confirm:hover { background: #3a7cc5; }
+.modal-btn.danger { background: #ef4444; color: #fff; border-color: #ef4444; }
+.modal-btn.danger:hover { background: #dc2626; }
+.modal-hint { font-size: 11px; color: #aaa; text-align: center; margin-top: -16px; margin-bottom: 16px; }
 </style>
 </head>
 <body>
@@ -244,16 +303,57 @@ tbody td { padding: 10px 14px; color: #333; }
         <th>파일명</th>
         <th>업로드날짜</th>
         <th>크기</th>
+        <th>Debug</th>
+        <th></th>
       </tr>
     </thead>
     <tbody id="resultsTbody">
-      <tr class="empty-row"><td colspan="8">데이터를 불러오는 중...</td></tr>
+      <tr class="empty-row"><td colspan="10">데이터를 불러오는 중...</td></tr>
     </tbody>
   </table>
   <div class="pager" id="pager"></div>
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- Execute 비밀번호 모달 -->
+<div class="modal-overlay" id="execModal">
+  <div class="modal-box">
+    <p class="modal-title">실행 비밀번호 설정</p>
+    <p class="modal-desc">삭제 시 사용할 4자리 비밀번호를 설정하세요.<br>비워두면 비밀번호 없이 삭제할 수 있습니다.</p>
+    <div class="pin-row" id="execPinRow">
+      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="execPin0">
+      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="execPin1">
+      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="execPin2">
+      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="execPin3">
+    </div>
+    <p class="modal-hint">숫자 4자리 (선택사항)</p>
+    <div class="modal-actions">
+      <button class="modal-btn" id="execModalCancel">취소</button>
+      <button class="modal-btn" id="execModalSkip">비밀번호 없이 실행</button>
+      <button class="modal-btn confirm" id="execModalConfirm">실행</button>
+    </div>
+  </div>
+</div>
+
+<!-- 삭제 비밀번호 모달 -->
+<div class="modal-overlay" id="delModal">
+  <div class="modal-box">
+    <p class="modal-title">세션 삭제</p>
+    <p class="modal-desc" id="delModalDesc">삭제하려면 비밀번호를 입력하세요.</p>
+    <div class="pin-row" id="delPinRow">
+      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="delPin0">
+      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="delPin1">
+      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="delPin2">
+      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="delPin3">
+    </div>
+    <p class="modal-hint" id="delModalHint">숫자 4자리</p>
+    <div class="modal-actions">
+      <button class="modal-btn" id="delModalCancel">취소</button>
+      <button class="modal-btn danger" id="delModalConfirm">삭제</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const PAGE_SIZE = 10;
@@ -290,20 +390,91 @@ function updateExecuteBtn() {
   executeBtn.disabled = !state.productType;
 }
 
-executeBtn.addEventListener("click", runExecute);
-
-async function runExecute() {
+executeBtn.addEventListener("click", () => {
   if (executeBtn.classList.contains("loading")) return;
   if (!state.productType) { showToast("Product Type(MD/PD/PM/SE)을 먼저 선택하세요.", true); return; }
+  openExecModal();
+});
 
+// ── PIN cell helpers ──────────────────────────────────────────────────────────
+function bindPinCells(prefix, count) {
+  const cells = Array.from({length: count}, (_, i) => document.getElementById(prefix + i));
+  cells.forEach((cell, i) => {
+    cell.addEventListener("keydown", e => {
+      if (e.key === "Backspace") {
+        if (cell.value === "" && i > 0) { cells[i-1].focus(); cells[i-1].value = ""; }
+        else { cell.value = ""; }
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "ArrowLeft" && i > 0) { cells[i-1].focus(); e.preventDefault(); return; }
+      if (e.key === "ArrowRight" && i < count-1) { cells[i+1].focus(); e.preventDefault(); return; }
+    });
+    cell.addEventListener("input", () => {
+      const v = cell.value.replace(/[^0-9]/g, "");
+      cell.value = v.slice(-1);
+      if (cell.value && i < count - 1) cells[i+1].focus();
+    });
+    cell.addEventListener("focus", () => cell.select());
+  });
+  return {
+    getValue() { return cells.map(c => c.value).join(""); },
+    clear() { cells.forEach(c => c.value = ""); cells[0].focus(); },
+    focus() { cells[0].focus(); },
+  };
+}
+
+const execPin = bindPinCells("execPin", 4);
+const delPin  = bindPinCells("delPin", 4);
+
+// ── Execute modal ─────────────────────────────────────────────────────────────
+const execModal = document.getElementById("execModal");
+
+function openExecModal() {
+  execPin.clear();
+  execModal.classList.add("open");
+  setTimeout(() => execPin.focus(), 50);
+}
+
+function closeExecModal() {
+  execModal.classList.remove("open");
+}
+
+document.getElementById("execModalCancel").addEventListener("click", closeExecModal);
+
+document.getElementById("execModalSkip").addEventListener("click", () => {
+  closeExecModal();
+  runExecute(null);
+});
+
+document.getElementById("execModalConfirm").addEventListener("click", () => {
+  const pin = execPin.getValue();
+  if (pin && pin.length !== 4) {
+    showToast("비밀번호는 정확히 4자리여야 합니다.", true);
+    execPin.clear();
+    return;
+  }
+  closeExecModal();
+  runExecute(pin || null);
+});
+
+execModal.addEventListener("click", e => {
+  if (e.target === execModal) closeExecModal();
+});
+
+async function runExecute(password) {
   executeBtn.classList.add("loading");
   executeBtn.disabled = true;
 
-  const fd = new FormData();
-  fd.append("product_type", state.productType);
+  const body = { product_type: state.productType };
+  if (password) body.password = password;
 
   try {
-    const res = await fetch("/pe/report/execute-debug", { method: "POST", body: fd });
+    const res = await fetch("/pe/report/execute-debug", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     if (!res.ok) {
       let msg = null;
       try { msg = (await res.json()).error; } catch { /* HTML response */ }
@@ -319,6 +490,72 @@ async function runExecute() {
     updateExecuteBtn();
   }
 }
+
+// ── Delete modal ──────────────────────────────────────────────────────────────
+const delModal = document.getElementById("delModal");
+let _delSessionId = null;
+let _delHasPassword = false;
+
+function openDelModal(sessionId, hasPassword) {
+  _delSessionId = sessionId;
+  _delHasPassword = hasPassword;
+  delPin.clear();
+  const desc = document.getElementById("delModalDesc");
+  const hint = document.getElementById("delModalHint");
+  const row = document.getElementById("delPinRow");
+  if (hasPassword) {
+    desc.textContent = "삭제하려면 설정된 비밀번호를 입력하세요.";
+    hint.style.display = "";
+    row.style.display = "";
+  } else {
+    desc.textContent = "이 세션을 삭제하시겠습니까? 비밀번호가 설정되어 있지 않습니다.";
+    hint.style.display = "none";
+    row.style.display = "none";
+  }
+  delModal.classList.add("open");
+  if (hasPassword) setTimeout(() => delPin.focus(), 50);
+}
+
+function closeDelModal() {
+  delModal.classList.remove("open");
+  _delSessionId = null;
+}
+
+document.getElementById("delModalCancel").addEventListener("click", closeDelModal);
+
+delModal.addEventListener("click", e => {
+  if (e.target === delModal) closeDelModal();
+});
+
+document.getElementById("delModalConfirm").addEventListener("click", async () => {
+  if (!_delSessionId) return;
+  const pin = _delHasPassword ? delPin.getValue() : "";
+  if (_delHasPassword && pin.length !== 4) {
+    showToast("비밀번호 4자리를 모두 입력하세요.", true);
+    delPin.clear();
+    return;
+  }
+  const body = {};
+  if (pin) body.password = pin;
+  try {
+    const res = await fetch(`/pe/report/session/${_delSessionId}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || `삭제 실패 (${res.status})`, true);
+      delPin.clear();
+      return;
+    }
+    closeDelModal();
+    showToast("세션이 삭제되었습니다.");
+    loadHistory();
+  } catch (e) {
+    showToast("삭제 중 오류: " + e.message, true);
+  }
+});
 
 // ── searchable select ─────────────────────────────────────────────────────────
 function buildSelect(wrapperId, inputId, dropdownId, filterKey, allLabel) {
@@ -354,7 +591,6 @@ function buildSelect(wrapperId, inputId, dropdownId, filterKey, allLabel) {
     const q = (query || "").toLowerCase();
     const filtered = options.filter(o => o.toLowerCase().includes(q));
     dropdown.innerHTML = "";
-    // All option
     const allEl = document.createElement("div");
     allEl.className = "sel-option all-opt" + (!selected ? " selected" : "");
     allEl.textContent = allLabel;
@@ -397,7 +633,6 @@ function buildSelect(wrapperId, inputId, dropdownId, filterKey, allLabel) {
     }
   });
 
-  // Close on outside click
   document.addEventListener("click", e => {
     if (!wrap.contains(e.target)) closeDropdown();
   });
@@ -405,7 +640,6 @@ function buildSelect(wrapperId, inputId, dropdownId, filterKey, allLabel) {
   return {
     setOptions(vals) {
       options = vals;
-      // If currently selected value is no longer available, reset
       if (selected && !vals.includes(selected)) {
         selected = null;
         state[filterKey] = null;
@@ -468,7 +702,7 @@ function renderPage() {
     `총 ${total}건 (${_currentPage + 1} / ${totalPages} 페이지)`;
 
   if (!total) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">검색 결과가 없습니다.</td></tr>';
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="10">검색 결과가 없습니다.</td></tr>';
     document.getElementById("pager").innerHTML = "";
     return;
   }
@@ -479,6 +713,9 @@ function renderPage() {
     const badgeCls = "badge badge-" + (VALID_PT.includes(pt) ? pt : "X");
     const date = r.created_at ? new Date(r.created_at * 1000).toLocaleString("ko-KR") : "-";
     const size = r.total_file_size ? formatSize(r.total_file_size) : "-";
+    const debugBadge = r.is_debug
+      ? '<span class="badge badge-debug">Debug</span>'
+      : '<span style="color:#ccc">-</span>';
     return `<tr data-session="${escHtml(r.session_id)}" data-dataset="${escHtml(r.dataset_id || '')}">
       <td><span class="${badgeCls}">${escHtml(pt)}</span></td>
       <td>${escHtml(r.product || '-')}</td>
@@ -488,12 +725,24 @@ function renderPage() {
       <td class="td-filename" title="${escHtml(r.file_name || '')}">${escHtml(r.file_name || '-')}</td>
       <td>${date}</td>
       <td>${size}</td>
+      <td>${debugBadge}</td>
+      <td><button class="btn-del" title="삭제" data-del="${escHtml(r.session_id)}" data-has-pwd="${r.has_password ? '1' : '0'}">🗑</button></td>
     </tr>`;
   }).join("");
 
   tbody.querySelectorAll("tr[data-session]").forEach(tr => {
-    tr.addEventListener("click", () => {
+    tr.addEventListener("click", e => {
+      if (e.target.closest(".btn-del")) return;
       location.href = "/pe/report/view/" + tr.dataset.session;
+    });
+  });
+
+  tbody.querySelectorAll(".btn-del").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const sid = btn.dataset.del;
+      const hasPwd = btn.dataset.hasPwd === "1";
+      openDelModal(sid, hasPwd);
     });
   });
 
@@ -506,7 +755,6 @@ function renderPagination(total, totalPages) {
 
   let html = `<button class="page-btn" ${_currentPage === 0 ? "disabled" : ""} onclick="goPage(${_currentPage - 1})">‹ 이전</button>`;
 
-  // show at most 7 page buttons with ellipsis
   const range = [];
   for (let i = 0; i < totalPages; i++) {
     if (i === 0 || i === totalPages - 1 || Math.abs(i - _currentPage) <= 2) {

@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS report_session (
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER,
     error_message TEXT,
-    lot_id        TEXT
+    lot_id        TEXT,
+    password      TEXT,
+    is_debug      INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_report_session_analysis_key
     ON report_session(analysis_key);
@@ -149,9 +151,11 @@ def _migrate(conn):
     # report_session: product_type, process, product, revision, dataset_id 컬럼 추가
     sess_info = conn.execute("PRAGMA table_info(report_session)").fetchall()
     sess_cols = {r[1] for r in sess_info}
-    for col in ("product_type", "process", "product", "revision", "dataset_id", "lot_id"):
+    for col in ("product_type", "process", "product", "revision", "dataset_id", "lot_id", "password"):
         if col not in sess_cols:
             conn.execute(f"ALTER TABLE report_session ADD COLUMN {col} TEXT")
+    if "is_debug" not in sess_cols:
+        conn.execute("ALTER TABLE report_session ADD COLUMN is_debug INTEGER DEFAULT 0")
 
 
 def init_report_db():
@@ -183,18 +187,27 @@ def _row(row):
 
 # ── session ─────────────────────────────────────────────────────────────────
 
-def create_session(session_id, file_name, file_path, product_type=None, dataset_id=None, lot_id=None):
+def create_session(session_id, file_name, file_path, product_type=None, dataset_id=None,
+                   lot_id=None, password=None, is_debug=0):
     now = _now()
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO report_session "
-            "(session_id, file_name, file_path, product_type, dataset_id, lot_id, status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
-            (session_id, file_name, str(file_path), product_type, dataset_id, lot_id, now, now),
+            "(session_id, file_name, file_path, product_type, dataset_id, lot_id, "
+            " password, is_debug, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+            (session_id, file_name, str(file_path), product_type, dataset_id, lot_id,
+             password, is_debug, now, now),
         )
 
 
 _SESSION_UPDATABLE = {"analysis_key", "content_hash", "status", "error_message", "file_path"}
+
+
+def delete_session(session_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM report_annotation WHERE session_id=?", (session_id,))
+        conn.execute("DELETE FROM report_session WHERE session_id=?", (session_id,))
 
 
 def update_session(session_id, **fields):
@@ -238,6 +251,8 @@ def get_history(product_type=None, process=None, product=None, revision=None, lo
     sql = f"""
         SELECT s.session_id, s.file_name, s.product_type, s.process, s.product,
                s.revision, s.lot_id, s.created_at, s.status, s.dataset_id,
+               s.is_debug,
+               CASE WHEN s.password IS NOT NULL THEN 1 ELSE 0 END AS has_password,
                COALESCE(SUM(c.file_size), 0) AS total_file_size
         FROM report_session s
         LEFT JOIN report_csv_files c ON c.analysis_key = s.analysis_key
