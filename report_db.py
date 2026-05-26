@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS report_session (
     status        TEXT DEFAULT 'pending',
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER,
-    error_message TEXT
+    error_message TEXT,
+    lot_id        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_report_session_analysis_key
     ON report_session(analysis_key);
@@ -148,7 +149,7 @@ def _migrate(conn):
     # report_session: product_type, process, product, revision, dataset_id 컬럼 추가
     sess_info = conn.execute("PRAGMA table_info(report_session)").fetchall()
     sess_cols = {r[1] for r in sess_info}
-    for col in ("product_type", "process", "product", "revision", "dataset_id"):
+    for col in ("product_type", "process", "product", "revision", "dataset_id", "lot_id"):
         if col not in sess_cols:
             conn.execute(f"ALTER TABLE report_session ADD COLUMN {col} TEXT")
 
@@ -182,14 +183,14 @@ def _row(row):
 
 # ── session ─────────────────────────────────────────────────────────────────
 
-def create_session(session_id, file_name, file_path, product_type=None, dataset_id=None):
+def create_session(session_id, file_name, file_path, product_type=None, dataset_id=None, lot_id=None):
     now = _now()
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO report_session "
-            "(session_id, file_name, file_path, product_type, dataset_id, status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
-            (session_id, file_name, str(file_path), product_type, dataset_id, now, now),
+            "(session_id, file_name, file_path, product_type, dataset_id, lot_id, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+            (session_id, file_name, str(file_path), product_type, dataset_id, lot_id, now, now),
         )
 
 
@@ -214,7 +215,7 @@ def get_session(session_id):
     return _row(row)
 
 
-def get_history(product_type=None, process=None, product=None, revision=None, limit=200):
+def get_history(product_type=None, process=None, product=None, revision=None, lot_id=None, limit=500):
     conditions = ["s.status IN ('done', 'reused')"]
     params = []
     if product_type:
@@ -229,11 +230,14 @@ def get_history(product_type=None, process=None, product=None, revision=None, li
     if revision:
         conditions.append("s.revision = ?")
         params.append(revision)
+    if lot_id:
+        conditions.append("s.lot_id LIKE ?")
+        params.append(f"%{lot_id}%")
     where = " AND ".join(conditions)
     params.append(limit)
     sql = f"""
         SELECT s.session_id, s.file_name, s.product_type, s.process, s.product,
-               s.revision, s.created_at, s.status, s.dataset_id,
+               s.revision, s.lot_id, s.created_at, s.status, s.dataset_id,
                COALESCE(SUM(c.file_size), 0) AS total_file_size
         FROM report_session s
         LEFT JOIN report_csv_files c ON c.analysis_key = s.analysis_key
@@ -251,7 +255,7 @@ def get_session_by_dataset_id(dataset_id):
     """dataset_id 로 가장 최근 세션 1건과 총 CSV 크기를 함께 반환."""
     sql = """
         SELECT s.session_id, s.file_name, s.product_type, s.process, s.product,
-               s.revision, s.created_at, s.status, s.dataset_id, s.analysis_key,
+               s.revision, s.lot_id, s.created_at, s.status, s.dataset_id, s.analysis_key,
                COALESCE(SUM(c.file_size), 0) AS total_file_size
         FROM report_session s
         LEFT JOIN report_csv_files c ON c.analysis_key = s.analysis_key

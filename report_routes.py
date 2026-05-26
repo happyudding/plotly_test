@@ -407,11 +407,13 @@ def history():
     process = request.args.get("process") or None
     product = request.args.get("product") or None
     revision = request.args.get("revision") or None
+    lot_id = request.args.get("lot_id") or None
     rows = report_db.get_history(
         product_type=product_type,
         process=process,
         product=product,
         revision=revision,
+        lot_id=lot_id,
     )
     return jsonify(rows)
 

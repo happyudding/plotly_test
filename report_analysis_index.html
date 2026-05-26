@@ -20,9 +20,9 @@ h1 { margin: 0 0 20px; font-size: 22px; font-weight: 700; color: #1a1a2e; }
   flex-wrap: wrap;
 }
 .pt-btn {
-  flex: 0 0 100px; height: 64px; border: 2px solid #d0d5dd;
+  flex: 0 0 80px; height: 56px; border: 2px solid #d0d5dd;
   border-radius: 10px; background: #fff; cursor: pointer;
-  font-size: 20px; font-weight: 700; color: #555;
+  font-size: 16px; font-weight: 700; color: #555;
   transition: all .15s;
 }
 .pt-btn:hover { border-color: #4a90e2; color: #4a90e2; background: #f0f6ff; }
@@ -49,37 +49,60 @@ h1 { margin: 0 0 20px; font-size: 22px; font-weight: 700; color: #1a1a2e; }
 .btn-execute.loading .spinner { display: block; }
 .btn-execute.loading .btn-label { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.selected-files {
-  font-size: 12px; color: #666; max-width: 260px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
 
 /* ── filter box ── */
 .filter-card {
   background: #fff; border-radius: 10px; padding: 16px 20px;
   box-shadow: 0 1px 6px rgba(0,0,0,.07); margin-bottom: 16px;
-  display: flex; align-items: flex-start; gap: 16px;
 }
-.filter-body { flex: 1; }
-.filter-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.filter-row:last-child { margin-bottom: 0; }
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.filter-group { display: flex; flex-direction: column; gap: 4px; }
 .filter-label {
-  width: 72px; font-size: 12px; font-weight: 600;
-  color: #888; flex-shrink: 0;
+  font-size: 11px; font-weight: 600; color: #888;
 }
-.pills { display: flex; flex-wrap: wrap; gap: 6px; }
-.pill {
-  padding: 3px 12px; border-radius: 20px; border: 1px solid #d0d5dd;
-  background: #fff; font-size: 12px; cursor: pointer; color: #555;
-  transition: all .12s;
+.filter-input {
+  height: 36px; padding: 0 10px; border: 1px solid #d0d5dd;
+  border-radius: 6px; font-size: 13px; color: #333;
+  outline: none; transition: border-color .12s;
+  background: #fff;
 }
-.pill:hover { border-color: #4a90e2; color: #4a90e2; }
-.pill.active { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+.filter-input:focus { border-color: #4a90e2; }
+
+/* searchable select */
+.sel-wrap { position: relative; }
+.sel-input {
+  width: 100%; height: 36px; padding: 0 30px 0 10px;
+  border: 1px solid #d0d5dd; border-radius: 6px;
+  font-size: 13px; color: #333; outline: none;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+  cursor: pointer; transition: border-color .12s;
+}
+.sel-input:focus { border-color: #4a90e2; }
+.sel-dropdown {
+  position: absolute; top: calc(100% + 2px); left: 0; right: 0;
+  background: #fff; border: 1px solid #d0d5dd; border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.1); z-index: 200;
+  max-height: 220px; overflow-y: auto; display: none;
+}
+.sel-dropdown.open { display: block; }
+.sel-option {
+  padding: 8px 12px; font-size: 13px; cursor: pointer;
+  color: #333; transition: background .1s;
+}
+.sel-option:hover, .sel-option.focused { background: #f0f6ff; }
+.sel-option.selected { font-weight: 600; color: #4a90e2; }
+.sel-option.all-opt { color: #888; font-style: italic; }
+
 .filter-actions {
-  display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
+  display: flex; align-items: flex-end; gap: 8px;
 }
 .btn-action {
-  padding: 7px 18px; border-radius: 6px; border: 1px solid #d0d5dd;
+  height: 36px; padding: 0 18px; border-radius: 6px; border: 1px solid #d0d5dd;
   background: #fff; font-size: 13px; cursor: pointer; color: #333;
   font-weight: 500; transition: all .12s; white-space: nowrap;
 }
@@ -115,16 +138,33 @@ tbody tr {
 tbody tr:last-child { border-bottom: none; }
 tbody tr:hover { background: #f0f6ff; }
 tbody td { padding: 10px 14px; color: #333; }
-.td-filename { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-filename { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge {
   display: inline-block; padding: 2px 10px; border-radius: 12px;
   font-size: 11px; font-weight: 600;
 }
-.badge-A { background: #dbeafe; color: #1d4ed8; }
-.badge-B { background: #dcfce7; color: #15803d; }
-.badge-C { background: #fef9c3; color: #854d0e; }
-.badge-D { background: #fce7f3; color: #9d174d; }
+.badge-MD { background: #dbeafe; color: #1d4ed8; }
+.badge-PD { background: #dcfce7; color: #15803d; }
+.badge-PM { background: #fef9c3; color: #854d0e; }
+.badge-SE { background: #fce7f3; color: #9d174d; }
+.badge-X  { background: #e5e7eb; color: #555; }
 .empty-row td { text-align: center; color: #aaa; padding: 40px; }
+
+/* ── pagination ── */
+.pager {
+  display: flex; align-items: center; justify-content: center;
+  gap: 4px; padding: 14px 0;
+  border-top: 1px solid #f0f2f5;
+}
+.page-btn {
+  min-width: 32px; height: 32px; padding: 0 6px;
+  border: 1px solid #d0d5dd; border-radius: 5px;
+  background: #fff; font-size: 13px; cursor: pointer; color: #333;
+  transition: all .1s; font-weight: 500;
+}
+.page-btn:hover:not(:disabled) { background: #f0f6ff; border-color: #4a90e2; color: #4a90e2; }
+.page-btn.active { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+.page-btn:disabled { color: #ccc; cursor: not-allowed; }
 
 /* toast */
 .toast {
@@ -143,10 +183,10 @@ tbody td { padding: 10px 14px; color: #333; }
 
 <!-- product type + execute -->
 <div class="top-bar">
-  <button class="pt-btn" data-pt="A">A</button>
-  <button class="pt-btn" data-pt="B">B</button>
-  <button class="pt-btn" data-pt="C">C</button>
-  <button class="pt-btn" data-pt="D">D</button>
+  <button class="pt-btn" data-pt="MD">MD</button>
+  <button class="pt-btn" data-pt="PD">PD</button>
+  <button class="pt-btn" data-pt="PM">PM</button>
+  <button class="pt-btn" data-pt="SE">SE</button>
   <div class="spacer"></div>
   <div class="execute-wrap">
     <button class="btn-execute" id="executeBtn" disabled>
@@ -158,30 +198,32 @@ tbody td { padding: 10px 14px; color: #333; }
 
 <!-- filter -->
 <div class="filter-card">
-  <div class="filter-body">
-    <div class="filter-row">
-      <span class="filter-label">Process</span>
-      <div class="pills" id="processPills">
-        <span class="pill active" data-filter="process" data-val="">All</span>
+  <div class="filter-grid">
+    <!-- Process searchable select -->
+    <div class="filter-group">
+      <label class="filter-label">Process</label>
+      <div class="sel-wrap" id="processWrap">
+        <input type="text" class="sel-input" id="processInput" placeholder="All" autocomplete="off" readonly>
+        <div class="sel-dropdown" id="processDropdown"></div>
       </div>
     </div>
-    <div class="filter-row">
-      <span class="filter-label">Product</span>
-      <div class="pills" id="productPills">
-        <span class="pill active" data-filter="product" data-val="">All Product</span>
+    <!-- Product searchable select -->
+    <div class="filter-group">
+      <label class="filter-label">Product</label>
+      <div class="sel-wrap" id="productWrap">
+        <input type="text" class="sel-input" id="productInput" placeholder="All" autocomplete="off" readonly>
+        <div class="sel-dropdown" id="productDropdown"></div>
       </div>
     </div>
-    <div class="filter-row">
-      <span class="filter-label">Revision</span>
-      <div class="pills" id="revisionPills">
-        <span class="pill active" data-filter="revision" data-val="">All EVT</span>
-      </div>
+    <!-- LOTID text search -->
+    <div class="filter-group">
+      <label class="filter-label">LOT ID</label>
+      <input type="text" class="filter-input" id="lotIdInput" placeholder="LOT ID 검색...">
     </div>
-  </div>
-  <div class="filter-actions">
-    <button class="btn-action primary" id="searchBtn">조회</button>
-    <button class="btn-action" id="uploadBtn">업로드</button>
-    <button class="btn-action" id="downloadBtn">다운로드</button>
+    <!-- search button -->
+    <div class="filter-actions">
+      <button class="btn-action primary" id="searchBtn">조회</button>
+    </div>
   </div>
 </div>
 
@@ -194,29 +236,34 @@ tbody td { padding: 10px 14px; color: #333; }
   <table>
     <thead>
       <tr>
-        <th>파일명</th>
         <th>Product Type</th>
-        <th>Process</th>
         <th>Product</th>
         <th>Revision</th>
+        <th>LOT ID</th>
+        <th>Process</th>
+        <th>파일명</th>
         <th>업로드날짜</th>
         <th>크기</th>
       </tr>
     </thead>
     <tbody id="resultsTbody">
-      <tr class="empty-row"><td colspan="7">데이터를 불러오는 중...</td></tr>
+      <tr class="empty-row"><td colspan="8">데이터를 불러오는 중...</td></tr>
     </tbody>
   </table>
+  <div class="pager" id="pager"></div>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
+const PAGE_SIZE = 10;
+let _lastRows = [];
+let _currentPage = 0;
+
 const state = {
   productType: null,
   process: null,
   product: null,
-  revision: null,
 };
 
 // ── product type buttons ──────────────────────────────────────────────────────
@@ -247,7 +294,7 @@ executeBtn.addEventListener("click", runExecute);
 
 async function runExecute() {
   if (executeBtn.classList.contains("loading")) return;
-  if (!state.productType) { showToast("Product Type(A~D)을 먼저 선택하세요.", true); return; }
+  if (!state.productType) { showToast("Product Type(MD/PD/PM/SE)을 먼저 선택하세요.", true); return; }
 
   executeBtn.classList.add("loading");
   executeBtn.disabled = true;
@@ -260,9 +307,7 @@ async function runExecute() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.statusText);
     showToast(`빌드 시작: ${data.session_id}`);
-    window.open("/pe/report/view/" + data.session_id, "_blank");
-    // 잠시 후 검색결과 갱신 (세션이 DB에 쌓일 시간 확보)
-    setTimeout(loadHistory, 800);
+    location.href = "/pe/report/view/" + data.session_id;
   } catch (e) {
     showToast(e.message, true);
   } finally {
@@ -271,24 +316,114 @@ async function runExecute() {
   }
 }
 
-// ── filter pills ──────────────────────────────────────────────────────────────
-document.querySelectorAll(".pill").forEach(pill => {
-  pill.addEventListener("click", () => {
-    const filterKey = pill.dataset.filter;
-    const val = pill.dataset.val;
-    const container = pill.closest(".pills");
-    container.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
-    pill.classList.add("active");
-    state[filterKey] = val || null;
+// ── searchable select ─────────────────────────────────────────────────────────
+function buildSelect(wrapperId, inputId, dropdownId, filterKey, allLabel) {
+  const wrap = document.getElementById(wrapperId);
+  const input = document.getElementById(inputId);
+  const dropdown = document.getElementById(dropdownId);
+  let options = [];
+  let selected = null;
+  let focusedIdx = -1;
+
+  function openDropdown() {
+    renderOptions(input.value === allLabel ? "" : input.value);
+    dropdown.classList.add("open");
+    input.readOnly = false;
+    input.select();
+  }
+
+  function closeDropdown() {
+    dropdown.classList.remove("open");
+    input.readOnly = true;
+    input.value = selected || allLabel;
+    focusedIdx = -1;
+  }
+
+  function selectOption(val) {
+    selected = val || null;
+    state[filterKey] = selected;
+    input.value = val || allLabel;
+    closeDropdown();
+  }
+
+  function renderOptions(query) {
+    const q = (query || "").toLowerCase();
+    const filtered = options.filter(o => o.toLowerCase().includes(q));
+    dropdown.innerHTML = "";
+    // All option
+    const allEl = document.createElement("div");
+    allEl.className = "sel-option all-opt" + (!selected ? " selected" : "");
+    allEl.textContent = allLabel;
+    allEl.addEventListener("mousedown", e => { e.preventDefault(); selectOption(""); });
+    dropdown.appendChild(allEl);
+    filtered.forEach(o => {
+      const el = document.createElement("div");
+      el.className = "sel-option" + (o === selected ? " selected" : "");
+      el.textContent = o;
+      el.addEventListener("mousedown", e => { e.preventDefault(); selectOption(o); });
+      dropdown.appendChild(el);
+    });
+    focusedIdx = -1;
+  }
+
+  input.addEventListener("click", () => {
+    if (dropdown.classList.contains("open")) closeDropdown();
+    else openDropdown();
   });
-});
+  input.addEventListener("input", () => renderOptions(input.value));
+  input.addEventListener("blur", () => setTimeout(closeDropdown, 150));
+  input.addEventListener("keydown", e => {
+    const items = dropdown.querySelectorAll(".sel-option");
+    if (e.key === "ArrowDown") {
+      focusedIdx = Math.min(focusedIdx + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle("focused", i === focusedIdx));
+      e.preventDefault();
+    } else if (e.key === "ArrowUp") {
+      focusedIdx = Math.max(focusedIdx - 1, 0);
+      items.forEach((el, i) => el.classList.toggle("focused", i === focusedIdx));
+      e.preventDefault();
+    } else if (e.key === "Enter") {
+      if (focusedIdx >= 0 && items[focusedIdx]) {
+        items[focusedIdx].dispatchEvent(new MouseEvent("mousedown"));
+      } else {
+        closeDropdown();
+      }
+    } else if (e.key === "Escape") {
+      closeDropdown();
+    }
+  });
+
+  // Close on outside click
+  document.addEventListener("click", e => {
+    if (!wrap.contains(e.target)) closeDropdown();
+  });
+
+  return {
+    setOptions(vals) {
+      options = vals;
+      // If currently selected value is no longer available, reset
+      if (selected && !vals.includes(selected)) {
+        selected = null;
+        state[filterKey] = null;
+        input.value = allLabel;
+      }
+    },
+    reset() {
+      selected = null;
+      state[filterKey] = null;
+      input.value = allLabel;
+    },
+  };
+}
+
+const processSelect = buildSelect("processWrap", "processInput", "processDropdown", "process", "All");
+const productSelect = buildSelect("productWrap", "productInput", "productDropdown", "product", "All Product");
 
 // ── action buttons ────────────────────────────────────────────────────────────
 document.getElementById("searchBtn").addEventListener("click", loadHistory);
-
-document.getElementById("uploadBtn").addEventListener("click", runExecute);
-
-document.getElementById("downloadBtn").addEventListener("click", downloadCSV);
+document.getElementById("lotIdInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") loadHistory();
+});
 
 // ── history API ───────────────────────────────────────────────────────────────
 async function loadHistory() {
@@ -296,41 +431,57 @@ async function loadHistory() {
   if (state.productType) params.set("product_type", state.productType);
   if (state.process)     params.set("process", state.process);
   if (state.product)     params.set("product", state.product);
-  if (state.revision)    params.set("revision", state.revision);
+  const lotId = document.getElementById("lotIdInput").value.trim();
+  if (lotId) params.set("lot_id", lotId);
 
   try {
     const res = await fetch("/pe/report/api/history?" + params);
     const rows = await res.json();
-    renderTable(rows);
-    updateFilterPills(rows);
+    _lastRows = rows;
+    _currentPage = 0;
+    updateDropdownOptions(rows);
+    renderPage();
   } catch (e) {
     showToast("목록 조회 실패: " + e.message, true);
   }
 }
 
-let _lastRows = [];
+function updateDropdownOptions(rows) {
+  const unique = key => [...new Set(rows.map(r => r[key]).filter(Boolean))].sort();
+  processSelect.setOptions(unique("process"));
+  productSelect.setOptions(unique("product"));
+}
 
-function renderTable(rows) {
-  _lastRows = rows;
+// ── render ────────────────────────────────────────────────────────────────────
+function renderPage() {
   const tbody = document.getElementById("resultsTbody");
-  document.getElementById("resultsCount").textContent = `총 ${rows.length}건`;
+  const total = _lastRows.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const start = _currentPage * PAGE_SIZE;
+  const pageRows = _lastRows.slice(start, start + PAGE_SIZE);
 
-  if (!rows.length) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">검색 결과가 없습니다.</td></tr>';
+  document.getElementById("resultsCount").textContent =
+    `총 ${total}건 (${_currentPage + 1} / ${totalPages} 페이지)`;
+
+  if (!total) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">검색 결과가 없습니다.</td></tr>';
+    document.getElementById("pager").innerHTML = "";
     return;
   }
 
-  tbody.innerHTML = rows.map(r => {
+  const VALID_PT = ["MD", "PD", "PM", "SE"];
+  tbody.innerHTML = pageRows.map(r => {
     const pt = r.product_type || "-";
-    const badgeCls = "badge badge-" + (["A","B","C","D"].includes(pt) ? pt : "A");
+    const badgeCls = "badge badge-" + (VALID_PT.includes(pt) ? pt : "X");
     const date = r.created_at ? new Date(r.created_at * 1000).toLocaleString("ko-KR") : "-";
     const size = r.total_file_size ? formatSize(r.total_file_size) : "-";
     return `<tr data-session="${escHtml(r.session_id)}" data-dataset="${escHtml(r.dataset_id || '')}">
-      <td class="td-filename" title="${escHtml(r.file_name || '')}">${escHtml(r.file_name || '-')}</td>
       <td><span class="${badgeCls}">${escHtml(pt)}</span></td>
-      <td>${escHtml(r.process || '-')}</td>
       <td>${escHtml(r.product || '-')}</td>
       <td>${escHtml(r.revision || '-')}</td>
+      <td>${escHtml(r.lot_id || '-')}</td>
+      <td>${escHtml(r.process || '-')}</td>
+      <td class="td-filename" title="${escHtml(r.file_name || '')}">${escHtml(r.file_name || '-')}</td>
       <td>${date}</td>
       <td>${size}</td>
     </tr>`;
@@ -338,54 +489,41 @@ function renderTable(rows) {
 
   tbody.querySelectorAll("tr[data-session]").forEach(tr => {
     tr.addEventListener("click", () => {
-      window.open("/pe/report/view/" + tr.dataset.session, "_blank", "noopener");
+      location.href = "/pe/report/view/" + tr.dataset.session;
     });
   });
+
+  renderPagination(total, totalPages);
 }
 
-function updateFilterPills(rows) {
-  const unique = key => [...new Set(rows.map(r => r[key]).filter(Boolean))].sort();
-  buildPills("processPills",  "process",  unique("process"),  "All");
-  buildPills("productPills",  "product",  unique("product"),  "All Product");
-  buildPills("revisionPills", "revision", unique("revision"), "All EVT");
+function renderPagination(total, totalPages) {
+  const pager = document.getElementById("pager");
+  if (totalPages <= 1) { pager.innerHTML = ""; return; }
+
+  let html = `<button class="page-btn" ${_currentPage === 0 ? "disabled" : ""} onclick="goPage(${_currentPage - 1})">‹ 이전</button>`;
+
+  // show at most 7 page buttons with ellipsis
+  const range = [];
+  for (let i = 0; i < totalPages; i++) {
+    if (i === 0 || i === totalPages - 1 || Math.abs(i - _currentPage) <= 2) {
+      range.push(i);
+    }
+  }
+  let prev = -1;
+  for (const p of range) {
+    if (prev !== -1 && p - prev > 1) html += `<span class="page-btn" style="cursor:default;border:none">…</span>`;
+    html += `<button class="page-btn ${p === _currentPage ? 'active' : ''}" onclick="goPage(${p})">${p + 1}</button>`;
+    prev = p;
+  }
+
+  html += `<button class="page-btn" ${_currentPage >= totalPages - 1 ? "disabled" : ""} onclick="goPage(${_currentPage + 1})">다음 ›</button>`;
+  pager.innerHTML = html;
 }
 
-function buildPills(containerId, filterKey, values, allLabel) {
-  const container = document.getElementById(containerId);
-  const current = state[filterKey];
-  container.innerHTML = `<span class="pill ${!current ? 'active' : ''}" data-filter="${filterKey}" data-val="">${allLabel}</span>`;
-  values.forEach(v => {
-    const pill = document.createElement("span");
-    pill.className = "pill" + (current === v ? " active" : "");
-    pill.dataset.filter = filterKey;
-    pill.dataset.val = v;
-    pill.textContent = v;
-    container.appendChild(pill);
-  });
-  container.querySelectorAll(".pill").forEach(pill => {
-    pill.addEventListener("click", () => {
-      container.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
-      pill.classList.add("active");
-      state[filterKey] = pill.dataset.val || null;
-    });
-  });
-}
-
-// ── download CSV ──────────────────────────────────────────────────────────────
-function downloadCSV() {
-  if (!_lastRows.length) { showToast("다운로드할 데이터가 없습니다.", true); return; }
-  const header = ["파일명", "ProductType", "Process", "Product", "Revision", "업로드날짜", "크기(bytes)"];
-  const lines = [header.join(",")];
-  _lastRows.forEach(r => {
-    const date = r.created_at ? new Date(r.created_at * 1000).toLocaleString("ko-KR") : "";
-    lines.push([r.file_name, r.product_type, r.process, r.product, r.revision, date, r.total_file_size]
-      .map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
-  });
-  const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = "report_history.csv"; a.click();
-  URL.revokeObjectURL(url);
+function goPage(page) {
+  _currentPage = page;
+  renderPage();
+  document.querySelector(".results-card").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ── utils ─────────────────────────────────────────────────────────────────────

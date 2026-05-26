@@ -44,19 +44,18 @@ def _build_session_meta_inline(html, dataset_id):
         return []
 
     pt = (sess.get("product_type") or "").strip()
-    pt_badge_cls = "session-badge session-badge-" + (pt if pt in ("A", "B", "C", "D") else "default")
+    pt_badge_cls = "session-badge session-badge-" + (pt if pt in ("MD", "PD", "PM", "SE") else "default")
 
     file_name = sess.get("file_name") or "-"
     items = [
-        html.Span(file_name, className="meta-inline-file", title=file_name),
         html.Span(pt or "-", className=pt_badge_cls),
-        html.Span(sess.get("process") or "-", className="meta-inline"),
         html.Span(sess.get("product") or "-", className="meta-inline"),
         html.Span(sess.get("revision") or "-", className="meta-inline"),
+        html.Span(sess.get("lot_id") or "-", className="meta-inline"),
+        html.Span(sess.get("process") or "-", className="meta-inline"),
+        html.Span(file_name, className="meta-inline-file", title=file_name),
         html.Span(_format_upload_date(sess.get("created_at")), className="meta-inline"),
         html.Span(_format_size(sess.get("total_file_size")), className="meta-inline"),
-        html.Span(sess.get("session_id") or "-", className="meta-inline meta-inline-sess",
-                  title=sess.get("session_id") or ""),
     ]
     return items
 
@@ -610,8 +609,9 @@ def register_dash(app):
                 html.H1("Report"),
                 html.Div(meta_items, className="topbar-meta"),
                 html.Div([
-                    html.Button("Download", id="download-report-btn", n_clicks=0, className="download-btn"),
+                    html.Button("Excel Download", id="download-report-btn", n_clicks=0, className="download-btn"),
                     html.Span(id="download-report-status", className="download-status"),
+                    html.A("Exit", href="/pe/report/", className="exit-btn"),
                 ], className="topbar-actions"),
             ], className="topbar"),
             dcc.Tabs(
@@ -668,6 +668,12 @@ def register_dash(app):
 
             # ── Yield Summary ─────────────────────────────────────────────────
             smry_comments = _read_summary_comments(dataset_id)
+            try:
+                _sess_meta = report_db.get_session_by_dataset_id(dataset_id)
+                lot_id_val = (_sess_meta or {}).get("lot_id") or "-"
+            except Exception:
+                lot_id_val = "-"
+            _ordinals = ["1st", "2nd", "3rd", "4th", "5th"]
             yield_summary_rows = []
             for i, r in enumerate(non_pass[:5], 1):
                 st = str(r.get("bin", ""))
@@ -675,13 +681,15 @@ def register_dash(app):
                 main_fail = (fail_subjects[0].get("subject", "N/A")
                              if fail_subjects else r.get("Main Fail subject", "N/A"))
                 portion = r.get("portion (%)", "")
-                major_fail_str = f"{st}  {main_fail}  {portion}%"
+                pct_str = f"{portion}%" if portion != "" else ""
                 yield_summary_rows.append({
-                    "no":         "",
-                    "yield":      pass_yield_str if i == 1 else "",
-                    "major_fail": major_fail_str,
-                    "comment":    smry_comments.get(st, ""),
-                    "_key":       st,
+                    "lotid":             lot_id_val if i == 1 else "",
+                    "yield":             pass_yield_str if i == 1 else "",
+                    "mfy_rank":          _ordinals[i - 1],
+                    "mfy_subject":       main_fail,
+                    "mfy_pct":           pct_str,
+                    "comment":           smry_comments.get(st, ""),
+                    "_key":              st,
                 })
 
             # ── Evaluation Summary ────────────────────────────────────────────
@@ -728,27 +736,42 @@ def register_dash(app):
                 dash_table.DataTable(
                     id="summary-yield-table",
                     columns=[
-                        {"name": "NO.",                              "id": "no"},
-                        {"name": "Yield",                            "id": "yield"},
-                        {"name": "Major Fail Bin (description, %)", "id": "major_fail"},
-                        {"name": "Comment",                          "id": "comment", "editable": True},
+                        {"name": ["", "LOTID"],                   "id": "lotid"},
+                        {"name": ["", "Yield"],                   "id": "yield"},
+                        {"name": ["Major Fail Yield", "Rank"],    "id": "mfy_rank"},
+                        {"name": ["Major Fail Yield", "Subject"], "id": "mfy_subject"},
+                        {"name": ["Major Fail Yield", "Yield %"], "id": "mfy_pct"},
+                        {"name": ["", "Comment"],                 "id": "comment", "editable": True},
                     ],
                     data=yield_summary_rows,
+                    merge_duplicate_headers=True,
                     editable=False,
                     sort_action="none",
                     filter_action="none",
                     style_table={"overflowX": "auto", "marginBottom": "8px"},
                     style_cell={**_cell, "textAlign": "left"},
                     style_cell_conditional=[
-                        {"if": {"column_id": "no"},    "width": "48px",  "textAlign": "center"},
-                        {"if": {"column_id": "yield"}, "width": "90px",  "textAlign": "center", "fontWeight": 600},
-                        {"if": {"column_id": "major_fail"}, "width": "320px"},
+                        {"if": {"column_id": "lotid"},      "width": "120px", "textAlign": "center", "fontWeight": 600},
+                        {"if": {"column_id": "yield"},      "width": "90px",  "textAlign": "center", "fontWeight": 600},
+                        {"if": {"column_id": "mfy_rank"},   "width": "60px",  "textAlign": "center"},
+                        {"if": {"column_id": "mfy_subject"},"width": "240px"},
+                        {"if": {"column_id": "mfy_pct"},    "width": "80px",  "textAlign": "center", "fontWeight": 600},
                         {"if": {"column_id": "comment"},    "width": "300px", "backgroundColor": "#fffdf3"},
                     ],
-                    style_data_conditional=[
-                        {"if": {"filter_query": '{yield} != ""', "column_id": "yield"},
-                         "borderTop": "2px solid #b8c4d4"},
-                    ],
+                    style_data_conditional=(
+                        [
+                            {"if": {"column_id": "lotid"}, "backgroundColor": "#eef4fb"},
+                            {"if": {"column_id": "yield"}, "backgroundColor": "#eef4fb"},
+                        ] + [
+                            {"if": {"row_index": idx, "column_id": col}, "borderTop": "none"}
+                            for idx in range(1, len(yield_summary_rows))
+                            for col in ("lotid", "yield")
+                        ] + [
+                            {"if": {"row_index": idx, "column_id": col}, "borderBottom": "none"}
+                            for idx in range(0, max(0, len(yield_summary_rows) - 1))
+                            for col in ("lotid", "yield")
+                        ]
+                    ),
                     style_header=_hdr,
                 ),
                 html.Div(id="summary-yield-save-status", className="save-status"),
@@ -1487,11 +1510,13 @@ def register_dash(app):
       .download-btn { font-size: 11px; padding: 3px 12px; border: 1px solid #2d7d46; background: #f4fbf6; color: #1a4d2b; border-radius: 4px; cursor: pointer; white-space: nowrap; }
       .download-btn:hover { background: #e6f5eb; }
       .download-status { font-size: 10px; color: #555; min-height: 12px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .exit-btn { font-size: 11px; padding: 3px 14px; border: 1px solid #d0d5dd; background: #fff; color: #555; border-radius: 4px; cursor: pointer; white-space: nowrap; text-decoration: none; font-weight: 600; line-height: 1.8; }
+      .exit-btn:hover { background: #fee2e2; border-color: #dc2626; color: #dc2626; }
       .session-badge { display: inline-block; padding: 1px 8px; border-radius: 9px; font-size: 10px; font-weight: 700; line-height: 1.3; }
-      .session-badge-A { background: #dbeafe; color: #1d4ed8; }
-      .session-badge-B { background: #dcfce7; color: #15803d; }
-      .session-badge-C { background: #fef9c3; color: #854d0e; }
-      .session-badge-D { background: #fce7f3; color: #9d174d; }
+      .session-badge-MD { background: #dbeafe; color: #1d4ed8; }
+      .session-badge-PD { background: #dcfce7; color: #15803d; }
+      .session-badge-PM { background: #fef9c3; color: #854d0e; }
+      .session-badge-SE { background: #fce7f3; color: #9d174d; }
       .session-badge-default { background: #e5e7eb; color: #555; }
       .save-status { font-size: 11px; color: #2d6b2d; margin-top: 6px; min-height: 14px; }
       .cpk-search-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }

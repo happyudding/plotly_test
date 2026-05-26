@@ -25,7 +25,13 @@ body {
   text-decoration: none; transition: all .12s;
 }
 .back-btn:hover { background: #f0f6ff; border-color: #4a90e2; color: #4a90e2; }
-.title { font-size: 18px; font-weight: 700; color: #1a1a2e; }
+.title { font-size: 18px; font-weight: 700; color: #1a1a2e; flex: 1; }
+.exit-btn {
+  padding: 6px 16px; border-radius: 6px; border: 1px solid #d0d5dd;
+  background: #fff; cursor: pointer; font-size: 12px; font-weight: 600;
+  color: #555; text-decoration: none; transition: all .12s; white-space: nowrap;
+}
+.exit-btn:hover { background: #fee2e2; border-color: #dc2626; color: #dc2626; }
 .session-id {
   font-family: monospace; font-size: 11px; color: #888;
   margin-bottom: 18px; word-break: break-all;
@@ -101,6 +107,7 @@ body {
   <div class="header">
     <a class="back-btn" href="/pe/report/">← 목록</a>
     <div class="title">Analysis Report</div>
+    <a class="exit-btn" href="/pe/report/">Exit</a>
   </div>
 
   <div class="session-id" id="sessionIdDisplay"></div>
