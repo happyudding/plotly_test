@@ -11,8 +11,8 @@ _log("importing Flask ...")
 from flask import Flask
 
 _log(f"importing blueprints ... ({time.perf_counter() - _t0:.2f}s)")
-from report_extension import report_bp
-from server import bp
+from report.report_extension import report_bp
+from server.server import bp
 
 _log(f"creating app ... ({time.perf_counter() - _t0:.2f}s)")
 app = Flask(__name__)
@@ -21,7 +21,7 @@ app.register_blueprint(report_bp)
 
 _log(f"registering Dash ... ({time.perf_counter() - _t0:.2f}s)")
 try:
-    from dash_dashboard import register_dash
+    from server.dash_dashboard import register_dash
 
     register_dash(app)
 except RuntimeError as exc:

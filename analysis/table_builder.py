@@ -284,7 +284,7 @@ def build_table_artifacts(dataset_id, schools):
 
 def load_raw_page(dataset_id, page_current=0, page_size=25, sort_by=None, filter_query="", source_file=None):
     input_dir = DATASETS_DIR / dataset_id / "input"
-    from data_loader import load_table
+    from analysis.data_loader import load_table
 
     schools = {p.stem: load_table(p) for p in sorted(input_dir.glob("*.csv"))}
     df = _combined_frames(schools)
@@ -339,7 +339,7 @@ def build_fail_values(dataset_id: str) -> list:
       source, dut, x_coord, y_coord, bin,
       subject, value, lower_limit, upper_limit, fail ("< lo" | "> hi")
     """
-    from data_loader import load_table
+    from analysis.data_loader import load_table
 
     input_dir = DATASETS_DIR / dataset_id / "input"
     if not input_dir.exists():
@@ -419,7 +419,7 @@ def get_fail_values(dataset_id: str) -> list:
 
 
 def build_raw_xlsx(dataset_id):
-    from data_loader import load_table
+    from analysis.data_loader import load_table
 
     input_dir = DATASETS_DIR / dataset_id / "input"
     if not input_dir.exists():

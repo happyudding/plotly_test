@@ -6,7 +6,7 @@ from config import (
     UPPER_LIMIT_ROW, LOWER_LIMIT_ROW, META_COLUMNS, N_META_COLUMNS,
     DATA_START_ROW, SUBJECT_NAME_ROW, UNITS_ROW,
 )
-from file_handling import csvfile_to_df
+from analysis.file_handling import csvfile_to_df
 
 
 @dataclass

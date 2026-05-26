@@ -4,21 +4,21 @@ from pathlib import Path
 
 import numpy as np
 
-import report_db
-import report_s3
-from chart_payload import build_payload
+from database import report_db
+from s3_storage import report_s3
+from analysis.chart_payload import build_payload
 from config import (
     REPORT_LOCK_MAX_WAIT_SEC,
     REPORT_LOCK_POLL_SEC,
 )
-from data_loader import load_table
-from preprocess import cumulative_distribution_full, to_numeric_clean
-from report_analysis_service import (
+from analysis.data_loader import load_table
+from analysis.preprocess import cumulative_distribution_full, to_numeric_clean
+from report.report_analysis_service import (
     compute_analysis_key,
     hash_files_streaming,
     normalize_options,
 )
-from report_s3 import S3NotConfigured, S3ObjectCorrupted
+from s3_storage.report_s3 import S3NotConfigured, S3ObjectCorrupted
 
 COLOR_PALETTE = [
     "#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",

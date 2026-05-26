@@ -12,7 +12,11 @@ def _path_env(name, default):
 INPUT_DIR = _path_env("PLOTLY_INPUT_DIR", ROOT_DIR / "data")
 OUTPUT_DIR = _path_env("PLOTLY_OUTPUT_DIR", ROOT_DIR / "output")
 DATASETS_DIR = _path_env("PLOTLY_DATASETS_DIR", OUTPUT_DIR / "datasets")
-UPLOAD_FORM_PATH = ROOT_DIR / "upload_form.html"
+UPLOAD_FORM_PATH = ROOT_DIR / "server" / "upload_form.html"
+
+# Report module HTML 위치 (report 패키지 안으로 이동됨)
+REPORT_ANALYSIS_INDEX_HTML = ROOT_DIR / "report" / "report_analysis_index.html"
+REPORT_VIEW_HTML           = ROOT_DIR / "report" / "report_view.html"
 SCHOOL_FILES_GLOB = os.getenv("SCHOOL_FILES_GLOB", "*_school_renamed.csv")
 
 META_COLUMNS = ["DUT", "XCoord", "YCoord", "Bin"]

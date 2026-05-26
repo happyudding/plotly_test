@@ -32,7 +32,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from config import DATASETS_DIR, SERVER_BASE_URL
-from table_builder import read_table_json, get_fail_values
+from analysis.table_builder import read_table_json, get_fail_values
 
 # ── private helpers duplicated from dash_dashboard to avoid Dash import ────────
 
@@ -689,8 +689,8 @@ def _sheet_histogram(wb, dataset_id):
 
 def _append_raw_sheets(wb, dataset_id: str, progress_cb=None):
     """build_raw_xlsx 와 동일한 데이터를 같은 workbook 에 raw_<source> 시트로 추가."""
-    from data_loader import load_table
-    from table_builder import _subject_columns, _fmt_type
+    from analysis.data_loader import load_table
+    from analysis.table_builder import _subject_columns, _fmt_type
     import pandas as pd
 
     input_dir = DATASETS_DIR / dataset_id / "input"

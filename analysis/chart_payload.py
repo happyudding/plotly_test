@@ -1,4 +1,4 @@
-from figure_builder import build_subject_payload_parts
+from analysis.figure_builder import build_subject_payload_parts
 
 
 def build_payload(subject_id, name, unit, lo, hi, traces):

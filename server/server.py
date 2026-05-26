@@ -8,11 +8,11 @@ from pathlib import Path
 from flask import Blueprint, abort, jsonify, redirect, request, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 
-import dataset_builder
+from analysis import dataset_builder
 from config import DATASETS_DIR
-from dash_dashboard import send_fail_png
-from table_builder import build_raw_xlsx
-from xlsx_export import build_report_xlsx
+from server.dash_dashboard import send_fail_png
+from analysis.table_builder import build_raw_xlsx
+from server.xlsx_export import build_report_xlsx
 
 bp = Blueprint("cumulative", __name__)
 DEFAULT_DATASET = "current"
@@ -136,8 +136,8 @@ def chart(id, sid):
 def view_histogram(id):
     if not _safe(id):
         abort(400)
-    from histogram_page import build_histogram_html
-    from table_builder import read_table_json
+    from analysis.histogram_page import build_histogram_html
+    from analysis.table_builder import read_table_json
 
     meta = read_table_json(id, "meta")
     if not meta:
@@ -147,7 +147,7 @@ def view_histogram(id):
         }
     subjects = [s["subject"] for s in (meta.get("subjects") or [])]
     sources = meta.get("sources") or []
-    from dataset_builder import COLOR_PALETTE
+    from analysis.dataset_builder import COLOR_PALETTE
     schools = [
         {"name": n, "color": COLOR_PALETTE[i % len(COLOR_PALETTE)]}
         for i, n in enumerate(sources)
@@ -163,7 +163,7 @@ def view_histogram(id):
 def histogram_chart(id, sid):
     if not _safe(id):
         abort(400)
-    from histogram_chart import build_histogram_payload
+    from analysis.histogram_chart import build_histogram_payload
     try:
         payload = build_histogram_payload(id, sid)
     except Exception as exc:
@@ -178,7 +178,7 @@ def histogram_thumb(id, sid):
     from flask import Response
     if not _safe(id):
         abort(400)
-    from histogram_chart import build_histogram_svg
+    from analysis.histogram_chart import build_histogram_svg
     try:
         svg = build_histogram_svg(id, sid)
     except Exception as exc:

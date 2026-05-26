@@ -9,18 +9,24 @@ from pathlib import Path
 from flask import abort, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
-import report_db
-import report_s3
-from config import INPUT_DIR, ROOT_DIR, REPORT_UPLOAD_DIR, SCHOOL_FILES_GLOB
-from report_analysis_service import (
+from database import report_db
+from s3_storage import report_s3
+from config import (
+    INPUT_DIR,
+    REPORT_ANALYSIS_INDEX_HTML,
+    REPORT_UPLOAD_DIR,
+    REPORT_VIEW_HTML,
+    SCHOOL_FILES_GLOB,
+)
+from report.report_analysis_service import (
     AnalysisError,
     AnalysisLockTimeout,
     get_or_compute_analysis,
     upload_derived_if_absent,
 )
-from report_extension import report_bp
-from report_plot_service import PlotError, PlotLockTimeout, get_or_create_plot
-from report_s3 import S3NotConfigured, S3ObjectCorrupted
+from report.report_extension import report_bp
+from report.report_plot_service import PlotError, PlotLockTimeout, get_or_create_plot
+from s3_storage.report_s3 import S3NotConfigured, S3ObjectCorrupted
 
 _ANALYSIS_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
@@ -349,13 +355,13 @@ def delete_annotation(aid):
 
 @report_bp.get("/")
 def index_page():
-    return send_file(ROOT_DIR / "report_analysis_index.html")
+    return send_file(REPORT_ANALYSIS_INDEX_HTML)
 
 
 @report_bp.get("/view/<session_id>")
 def view_page(session_id):
     _validate_session_id(session_id)
-    return send_file(ROOT_DIR / "report_view.html")
+    return send_file(REPORT_VIEW_HTML)
 
 
 @report_bp.post("/_analyze-only")
@@ -451,8 +457,8 @@ def execute():
 
     백그라운드에서 report analysis 와 cumulative dashboard 빌드를 병렬 수행.
     """
-    from dataset_builder import build_dataset
-    from server import _build_lock, _build_status
+    from analysis.dataset_builder import build_dataset
+    from server.server import _build_lock, _build_status
 
     files = request.files.getlist("files")
     if not files:

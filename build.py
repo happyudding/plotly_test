@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from dataset_builder import build_dataset
+from analysis.dataset_builder import build_dataset
 from config import SERVER_BASE_URL
 
 

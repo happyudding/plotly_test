@@ -5,19 +5,19 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-import report_db
-import report_s3
-from chart_payload import build_payload
+from database import report_db
+from s3_storage import report_s3
+from analysis.chart_payload import build_payload
 from config import (
     REPORT_LOCK_MAX_WAIT_SEC,
     REPORT_LOCK_POLL_SEC,
     REPORT_S3_BUCKET,
     REPORT_THUMB_WORKERS,
 )
-from data_loader import ExcelData, load_table
-from preprocess import cumulative_distribution_full, to_numeric_clean
-from svg_builder import build_subject_svg
-from table_builder import (
+from analysis.data_loader import ExcelData, load_table
+from analysis.preprocess import cumulative_distribution_full, to_numeric_clean
+from analysis.svg_builder import build_subject_svg
+from analysis.table_builder import (
     _build_cpk,
     _build_fail_items,
     _build_yield,
@@ -281,7 +281,7 @@ def build_summary_rows(schools):
 
 def _build_issue_table(schools):
     """비합격 DUT별 측정값 초과 레코드 (fail_values). 전 source 통합."""
-    from table_builder import PASS_BIN, _fmt_type, _fmt_num, _subject_columns
+    from analysis.table_builder import PASS_BIN, _fmt_type, _fmt_num, _subject_columns
     import pandas as pd
 
     rows = []

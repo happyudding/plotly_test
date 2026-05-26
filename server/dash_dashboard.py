@@ -5,8 +5,8 @@ from pathlib import Path
 from flask import abort, send_from_directory
 
 from config import DATASETS_DIR
-from table_builder import read_table_json, get_fail_values
-import report_db
+from analysis.table_builder import read_table_json, get_fail_values
+from database import report_db
 
 
 PAGE_SIZE = 25

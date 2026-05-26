@@ -11,8 +11,8 @@ from html import escape
 import numpy as np
 
 from config import DATASETS_DIR, LIMIT_COLOR, LIMIT_LINE_WIDTH
-from data_loader import load_table
-from preprocess import to_numeric_clean
+from analysis.data_loader import load_table
+from analysis.preprocess import to_numeric_clean
 
 _COLORS = [
     "#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",

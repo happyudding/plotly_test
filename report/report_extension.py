@@ -1,6 +1,6 @@
 from flask import Blueprint
 
-import report_db
+from database import report_db
 
 report_bp = Blueprint("report", __name__, url_prefix="/pe/report")
 
@@ -8,4 +8,4 @@ report_bp = Blueprint("report", __name__, url_prefix="/pe/report")
 report_db.init_report_db()
 
 # 라우트 등록 트리거 (report_bp 데코레이터가 이 시점에 모두 평가됨)
-import report_routes  # noqa: E402,F401
+from report import report_routes  # noqa: E402,F401

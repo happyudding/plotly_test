@@ -7,8 +7,8 @@ from config import (
     UPPER_LIMIT_ROW, LOWER_LIMIT_ROW, META_COLUMNS, N_META_COLUMNS,
     DATA_START_ROW, SUBJECT_NAME_ROW, UNITS_ROW,
 )
-from preprocess import cumulative_distribution_full, to_numeric_clean
-from table_builder import (
+from analysis.preprocess import cumulative_distribution_full, to_numeric_clean
+from analysis.table_builder import (
     PASS_BIN,
     _build_cpk,
     _build_fail_items,
@@ -34,7 +34,7 @@ class df_honey:
     @classmethod
     def from_file(cls, path) -> "df_honey":
         """CSV / Excel 파일 경로 → df_honey."""
-        from data_loader import load_table
+        from analysis.data_loader import load_table
         path = Path(path)
         exc = load_table(path)
         return cls(
@@ -150,7 +150,7 @@ class df_honey:
 
     def summary(self) -> list:
         """item × bin 단위 summary rows (build_summary_rows 결과)."""
-        from report_analysis_service import build_summary_rows
+        from report.report_analysis_service import build_summary_rows
         return build_summary_rows(self._as_schools())
 
     def __repr__(self):
@@ -184,7 +184,7 @@ class df_honey_group:
 
     def summary(self) -> list:
         """item × bin 단위 summary rows."""
-        from report_analysis_service import build_summary_rows
+        from report.report_analysis_service import build_summary_rows
         return build_summary_rows(self._schools)
 
     def distribution(self, subject_idx, school_name=None):

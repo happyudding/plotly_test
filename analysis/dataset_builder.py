@@ -3,13 +3,13 @@ import sys
 import time
 from pathlib import Path
 
-import page_builder
-import table_builder
-from chart_payload import build_payload
+from analysis import page_builder
+from analysis import table_builder
+from analysis.chart_payload import build_payload
 from config import DATASETS_DIR
-from data_loader import load_table
-from preprocess import cumulative_distribution_full, to_numeric_clean
-from svg_builder import build_subject_svg
+from analysis.data_loader import load_table
+from analysis.preprocess import cumulative_distribution_full, to_numeric_clean
+from analysis.svg_builder import build_subject_svg
 
 COLOR_PALETTE = [
     "#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",

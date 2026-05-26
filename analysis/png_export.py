@@ -17,7 +17,7 @@ def render_subject_pngs(subjects, dataset_id="current", width=800, height=550, s
         {subject_name: png_bytes} 형태의 dict. 입력에 없는 과목은 스킵.
 
     사용 예:
-        from png_export import render_subject_pngs
+        from analysis.png_export import render_subject_pngs
         pngs = render_subject_pngs(["수학", "영어"], dataset_id="current")
 
     openpyxl 삽입 예:
