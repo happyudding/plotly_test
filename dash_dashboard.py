@@ -627,6 +627,7 @@ def register_dash(app):
                     dcc.Tab(label="Fail Item", value="fail", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                     dcc.Tab(label="Issue Table", value="issues", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                     dcc.Tab(label="Distribution", value="distribution", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
+                    dcc.Tab(label="Histogram", value="histogram", style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                 ],
             ),
             html.Div(id="tab-content", className="content"),
@@ -1097,6 +1098,10 @@ def register_dash(app):
                     ),
                 ], open=True, className="low-cpk-details"),
             ], className="issue-table-wrap")
+        if tab == "histogram":
+            return html.Div([
+                html.Iframe(src=f"/view_histogram/{dataset_id}", className="distribution-frame"),
+            ], className="distribution-tab")
         return html.Div([
             html.Iframe(src=f"/view/{dataset_id}", className="distribution-frame"),
         ], className="distribution-tab")

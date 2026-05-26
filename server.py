@@ -91,6 +91,62 @@ def chart(id, sid):
     return _send(id, "charts", f"{sid}.json")
 
 
+@bp.get("/view_histogram/<id>")
+def view_histogram(id):
+    if not _safe(id):
+        abort(400)
+    from histogram_page import build_histogram_html
+    from table_builder import read_table_json
+
+    meta = read_table_json(id, "meta")
+    if not meta:
+        return _placeholder_html(id), 200, {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-cache",
+        }
+    subjects = [s["subject"] for s in (meta.get("subjects") or [])]
+    sources = meta.get("sources") or []
+    from dataset_builder import COLOR_PALETTE
+    schools = [
+        {"name": n, "color": COLOR_PALETTE[i % len(COLOR_PALETTE)]}
+        for i, n in enumerate(sources)
+    ]
+    html = build_histogram_html(id, subjects, schools)
+    return html, 200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-cache",
+    }
+
+
+@bp.get("/api/<id>/histogram_chart/<int:sid>")
+def histogram_chart(id, sid):
+    if not _safe(id):
+        abort(400)
+    from histogram_chart import build_histogram_payload
+    try:
+        payload = build_histogram_payload(id, sid)
+    except Exception as exc:
+        abort(500, f"histogram build failed: {exc}")
+    resp = jsonify(payload)
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+
+@bp.get("/api/<id>/histogram_thumb/<int:sid>")
+def histogram_thumb(id, sid):
+    from flask import Response
+    if not _safe(id):
+        abort(400)
+    from histogram_chart import build_histogram_svg
+    try:
+        svg = build_histogram_svg(id, sid)
+    except Exception as exc:
+        abort(500, f"histogram thumb failed: {exc}")
+    resp = Response(svg, mimetype="image/svg+xml")
+    resp.headers["Cache-Control"] = "public, max-age=86400, immutable"
+    return resp
+
+
 @bp.get("/api/<id>/thumb/<int:sid>")
 def thumb(id, sid):
     if not _safe(id):
