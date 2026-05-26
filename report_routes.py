@@ -439,40 +439,63 @@ def delete_session_route(session_id):
     return jsonify({"deleted": True, "session_id": session_id})
 
 
-@report_bp.post("/execute-debug")
-def execute_debug():
-    """로컬 디버그 CSV(a~c_school_updated_call.csv)로 전체 파이프라인 실행.
-    cumulative dashboard 빌드 + report analysis DB/S3 저장을 동시 수행."""
+@report_bp.post("/execute")
+def execute():
+    """사용자 업로드 CSV + 옵션(selected_items, analyses)으로 분석 + cumulative dashboard 빌드.
+
+    multipart/form-data:
+      - files[]: CSV 파일들
+      - options: JSON {"selected_items": [...], "analyses": [...]}
+      - product_type: MD/PD/PM/SE
+      - password: 4자리 (선택)
+
+    백그라운드에서 report analysis 와 cumulative dashboard 빌드를 병렬 수행.
+    """
     from dataset_builder import build_dataset
     from server import _build_lock, _build_status
 
-    if request.is_json:
-        body = request.get_json(silent=True, force=True) or {}
-        product_type = body.get("product_type") or None
-        password = (body.get("password") or "").strip() or None
-    else:
-        product_type = request.form.get("product_type") or None
-        password = (request.form.get("password") or "").strip() or None
+    files = request.files.getlist("files")
+    if not files:
+        abort(400, "no files uploaded")
+
+    options = _parse_options(request.form.get("options"))
+    product_type = request.form.get("product_type") or None
+    password = (request.form.get("password") or "").strip() or None
     if password and not re.match(r"^\d{4}$", password):
         abort(400, "password must be exactly 4 digits")
 
-    debug_files = sorted(INPUT_DIR.glob(SCHOOL_FILES_GLOB))
-    if not debug_files:
-        return jsonify({"error": f"디버그 CSV 파일을 찾을 수 없음: {INPUT_DIR}/{SCHOOL_FILES_GLOB}"}), 400
-
-    dataset_id = f"{int(time.time())}_{secrets.token_hex(3)}"
     session_id = f"{int(time.time())}_{secrets.token_hex(3)}"
-    inputs = {p.name: p for p in debug_files}
-    file_names = ",".join(p.name for p in debug_files)
+    dataset_id = f"{int(time.time())}_{secrets.token_hex(3)}"
+    REPORT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    session_dir = REPORT_UPLOAD_DIR / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    _resolve_under_upload_dir(session_dir)
 
+    saved_paths = []
+    saved_names = []
+    for f in files:
+        raw_name = f.filename or ""
+        name = secure_filename(raw_name)
+        if not _is_safe_csv_name(name):
+            continue
+        dest = session_dir / name
+        f.save(str(dest))
+        saved_paths.append(dest)
+        saved_names.append(name)
+
+    if not saved_paths:
+        shutil.rmtree(session_dir, ignore_errors=True)
+        abort(400, "no valid CSV files (need .csv extension)")
+
+    inputs = {p.name: p for p in saved_paths}
     report_db.create_session(
         session_id=session_id,
-        file_name=file_names,
-        file_path=str(INPUT_DIR),
+        file_name=",".join(saved_names),
+        file_path=str(session_dir),
         product_type=product_type,
         dataset_id=dataset_id,
         password=password,
-        is_debug=1,
+        is_debug=0,
     )
 
     def _set_status(s):
@@ -480,17 +503,16 @@ def execute_debug():
             _build_status[s["dataset_id"]] = s
 
     def _run_analysis():
-        """report analysis를 빌드와 병렬로 실행."""
         import traceback
         print(f"[bg:{session_id}] analysis thread START", flush=True)
         try:
-            result = get_or_compute_analysis(session_id, debug_files, {})
+            result = get_or_compute_analysis(session_id, saved_paths, options)
             analysis_key = result["analysis_key"]
             print(f"[bg:{session_id}] analysis done, S3 uploads next", flush=True)
             try:
-                _upload_csvs_to_s3(debug_files, analysis_key)
+                _upload_csvs_to_s3(saved_paths, analysis_key)
                 upload_derived_if_absent(
-                    analysis_key, result["content_hash"], result["options_json"], debug_files,
+                    analysis_key, result["content_hash"], result["options_json"], saved_paths,
                 )
                 print(f"[bg:{session_id}] S3 uploads done", flush=True)
             except S3NotConfigured:
@@ -508,7 +530,6 @@ def execute_debug():
         print(f"[bg:{session_id}] analysis thread END", flush=True)
 
     def _bg():
-        # report analysis 와 cumulative dashboard 빌드를 병렬로 실행
         print(f"[bg:{session_id}] _bg start, spawning analysis thread", flush=True)
         analysis_thread = threading.Thread(target=_run_analysis, daemon=True)
         analysis_thread.start()
@@ -528,7 +549,12 @@ def execute_debug():
             _set_status({"dataset_id": dataset_id, "stage": "error", "error": str(exc)})
 
         print(f"[bg:{session_id}] waiting for analysis thread to finish...", flush=True)
-        analysis_thread.join()  # 빌드 완료 후 분석도 끝날 때까지 대기
+        analysis_thread.join()
+        # 분석/빌드 모두 끝난 후 업로드 임시 디렉토리 정리
+        try:
+            shutil.rmtree(session_dir, ignore_errors=True)
+        except OSError:
+            pass
         print(f"[bg:{session_id}] _bg END", flush=True)
 
     threading.Thread(target=_bg, daemon=True).start()

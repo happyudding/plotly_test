@@ -14,7 +14,7 @@ from config import (
     REPORT_S3_BUCKET,
     REPORT_THUMB_WORKERS,
 )
-from data_loader import load_table
+from data_loader import ExcelData, load_table
 from preprocess import cumulative_distribution_full, to_numeric_clean
 from svg_builder import build_subject_svg
 from table_builder import (
@@ -64,12 +64,81 @@ def normalize_options(options):
     return json.dumps(options, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
-def compute_analysis_key(content_hash, options_json):
+def compute_analysis_key(content_hash, options_json, session_id=None):
+    """analysis_key = sha256(content_hash : options_json [: session_id]).
+
+    session_id 가 주어지면 항상 unique 한 키를 생성한다 (캐시 재사용 없음).
+    동일 CSV/옵션이라도 세션마다 독립적인 분석 결과를 보장하기 위함.
+    """
     digest = hashlib.sha256()
     digest.update(content_hash.encode("utf-8"))
     digest.update(b":")
     digest.update(options_json.encode("utf-8"))
+    if session_id:
+        digest.update(b":")
+        digest.update(session_id.encode("utf-8"))
     return digest.hexdigest()
+
+
+# ---------- options helpers ----------------------------------------------
+
+def _extract_selected_items(options):
+    """options 에서 selected_items 리스트 추출. dict/JSON 문자열 둘 다 허용."""
+    if not options:
+        return None
+    if isinstance(options, str):
+        try:
+            options = json.loads(options)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(options, dict):
+        return None
+    items = options.get("selected_items")
+    if not items or not isinstance(items, (list, tuple)):
+        return None
+    items = [str(s) for s in items if s is not None and str(s) != ""]
+    return items or None
+
+
+def _filter_schools_by_items(schools, selected_items):
+    """selected_items 에 들어있는 subject 만 남긴 새 schools dict 반환.
+
+    selected_items 가 None/빈 리스트면 schools 를 그대로 반환.
+    각 ExcelData 의 subjects/units/lower_limits/upper_limits/scores 컬럼을 필터링.
+    meta(DUT/XCoord/YCoord/Bin) 는 그대로 유지 (행 수 동일).
+    """
+    if not selected_items:
+        return schools
+    sel_set = set(selected_items)
+    filtered = {}
+    for name, table in schools.items():
+        keep_indices = [i for i, s in enumerate(table.subjects) if s in sel_set]
+        new_subjects = [table.subjects[i] for i in keep_indices]
+        new_units = [
+            table.units[i] if i < len(table.units) else "" for i in keep_indices
+        ]
+        new_lower = [
+            table.lower_limits[i] if i < len(table.lower_limits) else None
+            for i in keep_indices
+        ]
+        new_upper = [
+            table.upper_limits[i] if i < len(table.upper_limits) else None
+            for i in keep_indices
+        ]
+        if keep_indices:
+            new_scores = table.scores.iloc[:, keep_indices].copy()
+            new_scores.columns = list(range(len(keep_indices)))
+        else:
+            new_scores = table.scores.iloc[:, 0:0].copy()
+        filtered[name] = ExcelData(
+            subjects=new_subjects,
+            units=new_units,
+            lower_limits=new_lower,
+            upper_limits=new_upper,
+            scores=new_scores,
+            meta=table.meta,
+        )
+    return filtered
 
 
 # ---------- numeric helpers ------------------------------------------------
@@ -322,6 +391,7 @@ def upload_derived_if_absent(analysis_key, content_hash, options_json, file_path
 
     file_paths = [Path(p) for p in file_paths]
     schools = {p.stem: load_table(p) for p in sorted(file_paths, key=lambda x: x.name)}
+    schools = _filter_schools_by_items(schools, _extract_selected_items(options_json))
 
     # fail_items (JSON) — thumbs 생성에도 필요하므로 먼저 빌드
     fail_data = None
@@ -390,7 +460,8 @@ def get_or_compute_analysis(session_id, file_paths, options):
     content_hash = hash_files_streaming(file_paths)
     _log(f"hashed in {time.time()-t0:.2f}s")
     options_json = normalize_options(options)
-    analysis_key = compute_analysis_key(content_hash, options_json)
+    # session_id 를 키에 포함 → 같은 CSV+옵션이라도 세션마다 독립 (캐시 재사용 없음).
+    analysis_key = compute_analysis_key(content_hash, options_json, session_id)
     _log(f"analysis_key={analysis_key[:12]}...")
 
     report_db.update_session(
@@ -448,6 +519,10 @@ def get_or_compute_analysis(session_id, file_paths, options):
         _log("loading CSV files (load_table)...")
         t0 = time.time()
         schools = {p.stem: load_table(p) for p in sorted(file_paths, key=lambda x: x.name)}
+        selected_items = _extract_selected_items(options)
+        if selected_items:
+            schools = _filter_schools_by_items(schools, selected_items)
+            _log(f"filtered to {len(selected_items)} selected items")
         _log(f"loaded {len(schools)} schools in {time.time()-t0:.2f}s")
 
         _log("build_summary_rows...")

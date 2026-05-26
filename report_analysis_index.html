@@ -234,6 +234,101 @@ tbody td { padding: 10px 14px; color: #333; }
 .modal-btn.danger { background: #ef4444; color: #fff; border-color: #ef4444; }
 .modal-btn.danger:hover { background: #dc2626; }
 .modal-hint { font-size: 11px; color: #aaa; text-align: center; margin-top: -16px; margin-bottom: 16px; }
+
+/* ── execute new flow: file picker + options ── */
+.modal-box.wide { width: 760px; max-width: calc(100vw - 40px); }
+.modal-section-title {
+  font-size: 12px; font-weight: 700; color: #555;
+  margin: 0 0 8px; text-transform: uppercase; letter-spacing: .03em;
+}
+
+/* file picker */
+.file-picker { margin-bottom: 20px; }
+.file-drop {
+  border: 2px dashed #cbd5e1; border-radius: 10px;
+  padding: 20px; text-align: center; cursor: pointer;
+  transition: all .12s; background: #f9fafb;
+}
+.file-drop:hover, .file-drop.dragover {
+  border-color: #4a90e2; background: #f0f6ff;
+}
+.file-drop-label { font-size: 13px; color: #555; }
+.file-drop-hint { font-size: 11px; color: #999; margin-top: 4px; }
+.file-list {
+  margin-top: 12px; max-height: 180px; overflow-y: auto;
+  border: 1px solid #e8eaed; border-radius: 6px;
+  background: #fff;
+}
+.file-list:empty { display: none; }
+.file-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px; font-size: 12px; color: #333;
+  border-bottom: 1px solid #f0f2f5;
+}
+.file-item:last-child { border-bottom: none; }
+.file-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-item-size { color: #999; font-size: 11px; }
+.file-item-del {
+  width: 22px; height: 22px; border-radius: 4px; border: 1px solid #fca5a5;
+  background: #fff5f5; color: #ef4444; cursor: pointer; font-size: 11px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.file-item-del:hover { background: #fee2e2; }
+
+/* dual list */
+.dual-list {
+  display: grid; grid-template-columns: 1fr 60px 1fr; gap: 12px;
+  margin-bottom: 18px;
+}
+.dl-pane { display: flex; flex-direction: column; }
+.dl-title {
+  font-size: 11px; font-weight: 700; color: #666;
+  margin-bottom: 6px; text-transform: uppercase;
+}
+.dl-box {
+  height: 220px; width: 100%; border: 1px solid #d0d5dd;
+  border-radius: 6px; font-size: 12px; padding: 4px;
+  outline: none; transition: border-color .12s; background: #fff;
+}
+.dl-box:focus { border-color: #4a90e2; }
+.dl-box option { padding: 4px 8px; cursor: pointer; }
+.dl-arrows {
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 6px;
+}
+.dl-btn {
+  height: 32px; border: 1px solid #d0d5dd; border-radius: 6px;
+  background: #fff; cursor: pointer; font-size: 14px; color: #333;
+  font-weight: 600; transition: all .12s;
+}
+.dl-btn:hover { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+.dl-btn:disabled { color: #ccc; cursor: not-allowed; background: #f8f9fb; }
+.dl-btn:disabled:hover { background: #f8f9fb; color: #ccc; border-color: #d0d5dd; }
+
+/* analysis checkboxes */
+.analysis-types {
+  background: #f8f9fb; border-radius: 8px; padding: 12px 14px;
+  margin-bottom: 18px;
+}
+.analysis-types-row {
+  display: flex; flex-wrap: wrap; gap: 12px;
+}
+.cb-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: #333; cursor: pointer;
+  padding: 4px 10px; border-radius: 6px; transition: background .1s;
+}
+.cb-label:hover { background: #e8eef7; }
+.cb-label input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
+
+/* options modal actions row: back | pw | confirm */
+.modal-actions.opts-row { align-items: center; }
+.opt-pw-input {
+  height: 38px; padding: 0 10px; border: 1px solid #d0d5dd; border-radius: 7px;
+  font-size: 13px; width: 140px; outline: none;
+  margin-right: 6px;
+}
+.opt-pw-input:focus { border-color: #4a90e2; }
 </style>
 </head>
 <body>
@@ -316,22 +411,67 @@ tbody td { padding: 10px 14px; color: #333; }
 
 <div class="toast" id="toast"></div>
 
-<!-- Execute 비밀번호 모달 -->
-<div class="modal-overlay" id="execModal">
-  <div class="modal-box">
-    <p class="modal-title">실행 비밀번호 설정</p>
-    <p class="modal-desc">삭제 시 사용할 4자리 비밀번호를 설정하세요.<br>비워두면 비밀번호 없이 삭제할 수 있습니다.</p>
-    <div class="pin-row" id="execPinRow">
-      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="execPin0">
-      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="execPin1">
-      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="execPin2">
-      <input class="pin-cell" type="number" min="0" max="9" maxlength="1" id="execPin3">
+<!-- Step 1: CSV 파일 선택 -->
+<div class="modal-overlay" id="fileModal">
+  <div class="modal-box wide">
+    <p class="modal-title">CSV 파일 선택</p>
+    <p class="modal-desc">분석할 CSV 파일을 선택하세요. 여러 파일을 한 번에 선택할 수 있습니다.</p>
+    <div class="file-picker">
+      <input type="file" id="fileInput" multiple accept=".csv" style="display:none">
+      <div class="file-drop" id="fileDrop">
+        <div class="file-drop-label">📁 클릭하여 파일 선택  <span style="color:#999">또는 여기로 드래그</span></div>
+        <div class="file-drop-hint">.csv 파일만 허용 · 여러 개 선택 가능</div>
+      </div>
+      <div class="file-list" id="fileList"></div>
     </div>
-    <p class="modal-hint">숫자 4자리 (선택사항)</p>
     <div class="modal-actions">
-      <button class="modal-btn" id="execModalCancel">취소</button>
-      <button class="modal-btn" id="execModalSkip">비밀번호 없이 실행</button>
-      <button class="modal-btn confirm" id="execModalConfirm">실행</button>
+      <button class="modal-btn" id="fileModalCancel">취소</button>
+      <button class="modal-btn confirm" id="fileModalStart" disabled>Start ▶</button>
+    </div>
+  </div>
+</div>
+
+<!-- Step 2: 옵션 설정 -->
+<div class="modal-overlay" id="optionsModal">
+  <div class="modal-box wide">
+    <p class="modal-title">분석 옵션 설정</p>
+    <p class="modal-desc">분석할 Item 을 오른쪽으로 이동하고, 분석 종류를 선택하세요.</p>
+
+    <p class="modal-section-title">Item 선택</p>
+    <div class="dual-list">
+      <div class="dl-pane">
+        <div class="dl-title">전체 Item (<span id="dlAvailCount">0</span>)</div>
+        <select class="dl-box" id="dlAvailable" multiple></select>
+      </div>
+      <div class="dl-arrows">
+        <button class="dl-btn" id="dlAddAllBtn" title="전체 오른쪽">»</button>
+        <button class="dl-btn" id="dlAddBtn" title="오른쪽으로">→</button>
+        <button class="dl-btn" id="dlRemoveBtn" title="왼쪽으로">←</button>
+        <button class="dl-btn" id="dlRemoveAllBtn" title="전체 왼쪽">«</button>
+      </div>
+      <div class="dl-pane">
+        <div class="dl-title">선택된 Item (<span id="dlSelCount">0</span>)</div>
+        <select class="dl-box" id="dlSelected" multiple></select>
+      </div>
+    </div>
+
+    <p class="modal-section-title">분석 종류</p>
+    <div class="analysis-types">
+      <div class="analysis-types-row" id="analysisTypes">
+        <label class="cb-label"><input type="checkbox" value="Yield" checked> Yield</label>
+        <label class="cb-label"><input type="checkbox" value="CPK" checked> CPK</label>
+        <label class="cb-label"><input type="checkbox" value="Fail_Item" checked> Fail_Item</label>
+        <label class="cb-label"><input type="checkbox" value="Distribution" checked> Distribution</label>
+        <label class="cb-label"><input type="checkbox" value="Histogram" checked> Histogram</label>
+      </div>
+    </div>
+
+    <div class="modal-actions opts-row">
+      <button class="modal-btn" id="optModalBack">← 뒤로</button>
+      <div class="spacer" style="flex:1"></div>
+      <input type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
+             placeholder="PW 4자리 (선택)" id="optPw" class="opt-pw-input" autocomplete="off">
+      <button class="modal-btn confirm" id="optModalConfirm">Confirm ▶</button>
     </div>
   </div>
 </div>
@@ -393,10 +533,10 @@ function updateExecuteBtn() {
 executeBtn.addEventListener("click", () => {
   if (executeBtn.classList.contains("loading")) return;
   if (!state.productType) { showToast("Product Type(MD/PD/PM/SE)을 먼저 선택하세요.", true); return; }
-  openExecModal();
+  openFileModal();
 });
 
-// ── PIN cell helpers ──────────────────────────────────────────────────────────
+// ── PIN cell helpers (delete modal 만 사용) ─────────────────────────────────
 function bindPinCells(prefix, count) {
   const cells = Array.from({length: count}, (_, i) => document.getElementById(prefix + i));
   cells.forEach((cell, i) => {
@@ -424,57 +564,262 @@ function bindPinCells(prefix, count) {
   };
 }
 
-const execPin = bindPinCells("execPin", 4);
 const delPin  = bindPinCells("delPin", 4);
 
-// ── Execute modal ─────────────────────────────────────────────────────────────
-const execModal = document.getElementById("execModal");
+// ── New Execute flow: Step 1 (file picker) ───────────────────────────────────
+const fileModal   = document.getElementById("fileModal");
+const optionsModal = document.getElementById("optionsModal");
+const fileInput   = document.getElementById("fileInput");
+const fileDrop    = document.getElementById("fileDrop");
+const fileListEl  = document.getElementById("fileList");
+const fileStartBtn = document.getElementById("fileModalStart");
 
-function openExecModal() {
-  execPin.clear();
-  execModal.classList.add("open");
-  setTimeout(() => execPin.focus(), 50);
+// 선택된 File 객체 목록과, 거기서 파싱한 item(subject) 합집합.
+let _selectedFiles = [];     // Array<File>
+let _availableItems = [];    // Array<string>
+let _chosenItems = [];       // Array<string> (옵션 모달 오른쪽 리스트)
+
+function openFileModal() {
+  _selectedFiles = [];
+  _availableItems = [];
+  _chosenItems = [];
+  fileInput.value = "";
+  renderFileList();
+  fileModal.classList.add("open");
 }
+function closeFileModal() { fileModal.classList.remove("open"); }
 
-function closeExecModal() {
-  execModal.classList.remove("open");
-}
-
-document.getElementById("execModalCancel").addEventListener("click", closeExecModal);
-
-document.getElementById("execModalSkip").addEventListener("click", () => {
-  closeExecModal();
-  runExecute(null);
+fileDrop.addEventListener("click", () => fileInput.click());
+fileDrop.addEventListener("dragover", e => {
+  e.preventDefault();
+  fileDrop.classList.add("dragover");
+});
+fileDrop.addEventListener("dragleave", () => fileDrop.classList.remove("dragover"));
+fileDrop.addEventListener("drop", e => {
+  e.preventDefault();
+  fileDrop.classList.remove("dragover");
+  const dropped = Array.from(e.dataTransfer.files || []).filter(f =>
+    f.name.toLowerCase().endsWith(".csv"));
+  addFiles(dropped);
 });
 
-document.getElementById("execModalConfirm").addEventListener("click", () => {
-  const pin = execPin.getValue();
-  if (pin && pin.length !== 4) {
-    showToast("비밀번호는 정확히 4자리여야 합니다.", true);
-    execPin.clear();
+fileInput.addEventListener("change", () => {
+  addFiles(Array.from(fileInput.files || []));
+  fileInput.value = "";
+});
+
+function addFiles(files) {
+  if (!files || !files.length) return;
+  // 동일 이름 중복 제거
+  const existing = new Set(_selectedFiles.map(f => f.name));
+  for (const f of files) {
+    if (!f.name.toLowerCase().endsWith(".csv")) continue;
+    if (existing.has(f.name)) continue;
+    _selectedFiles.push(f);
+    existing.add(f.name);
+  }
+  renderFileList();
+}
+
+function removeFile(name) {
+  _selectedFiles = _selectedFiles.filter(f => f.name !== name);
+  renderFileList();
+}
+
+function renderFileList() {
+  if (!_selectedFiles.length) {
+    fileListEl.innerHTML = "";
+    fileStartBtn.disabled = true;
     return;
   }
-  closeExecModal();
-  runExecute(pin || null);
+  fileListEl.innerHTML = _selectedFiles.map(f => `
+    <div class="file-item">
+      <span class="file-item-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+      <span class="file-item-size">${formatSize(f.size)}</span>
+      <button class="file-item-del" data-name="${escHtml(f.name)}" title="제거">✕</button>
+    </div>
+  `).join("");
+  fileListEl.querySelectorAll(".file-item-del").forEach(b => {
+    b.addEventListener("click", () => removeFile(b.dataset.name));
+  });
+  fileStartBtn.disabled = false;
+}
+
+document.getElementById("fileModalCancel").addEventListener("click", closeFileModal);
+fileModal.addEventListener("click", e => { if (e.target === fileModal) closeFileModal(); });
+
+fileStartBtn.addEventListener("click", async () => {
+  if (!_selectedFiles.length) return;
+  fileStartBtn.disabled = true;
+  try {
+    const items = await extractItemsFromFiles(_selectedFiles);
+    if (!items.length) {
+      showToast("CSV 첫 줄에서 Item을 읽지 못했습니다.", true);
+      fileStartBtn.disabled = false;
+      return;
+    }
+    _availableItems = items;
+    _chosenItems = items.slice();  // 기본값: 전체 선택
+    closeFileModal();
+    openOptionsModal();
+  } catch (e) {
+    showToast("파일 파싱 실패: " + e.message, true);
+    fileStartBtn.disabled = false;
+  }
 });
 
-execModal.addEventListener("click", e => {
-  if (e.target === execModal) closeExecModal();
+// CSV 첫 줄에서 subject 이름들(META 컬럼 4개 이후) 추출. 여러 파일 union(순서 유지).
+async function extractItemsFromFiles(files) {
+  const META_COLS = 4;  // DUT, XCoord, YCoord, Bin
+  const seen = new Set();
+  const out = [];
+  for (const f of files) {
+    // 처음 일부 바이트만 읽어도 첫 줄은 잡힘. 안전하게 64KB.
+    const slice = f.slice(0, 64 * 1024);
+    let text = await slice.text();
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);  // strip BOM
+    const firstLine = text.split(/\r?\n/)[0] || "";
+    const cols = parseCsvLine(firstLine);
+    for (let i = META_COLS; i < cols.length; i++) {
+      const name = (cols[i] || "").trim();
+      if (!name) continue;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      out.push(name);
+    }
+  }
+  return out;
+}
+
+// 간단한 CSV 한 줄 파서 (따옴표/이스케이프 지원).
+function parseCsvLine(line) {
+  const out = [];
+  let cur = "", inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
+      else if (c === '"') { inQ = false; }
+      else { cur += c; }
+    } else {
+      if (c === ',') { out.push(cur); cur = ""; }
+      else if (c === '"') { inQ = true; }
+      else { cur += c; }
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+// ── New Execute flow: Step 2 (options modal) ─────────────────────────────────
+const dlAvailable = document.getElementById("dlAvailable");
+const dlSelected = document.getElementById("dlSelected");
+const dlAvailCount = document.getElementById("dlAvailCount");
+const dlSelCount = document.getElementById("dlSelCount");
+
+function openOptionsModal() {
+  renderDualList();
+  // 분석 종류 기본: 전부 체크
+  document.querySelectorAll("#analysisTypes input[type=checkbox]").forEach(cb => cb.checked = true);
+  document.getElementById("optPw").value = "";
+  optionsModal.classList.add("open");
+}
+function closeOptionsModal() { optionsModal.classList.remove("open"); }
+
+function renderDualList() {
+  const chosenSet = new Set(_chosenItems);
+  const avail = _availableItems.filter(x => !chosenSet.has(x));
+  dlAvailable.innerHTML = avail.map(x =>
+    `<option value="${escHtml(x)}">${escHtml(x)}</option>`).join("");
+  dlSelected.innerHTML = _chosenItems.map(x =>
+    `<option value="${escHtml(x)}">${escHtml(x)}</option>`).join("");
+  dlAvailCount.textContent = avail.length;
+  dlSelCount.textContent = _chosenItems.length;
+}
+
+function moveSelected(fromEl, toRight) {
+  const selected = Array.from(fromEl.selectedOptions).map(o => o.value);
+  if (!selected.length) return;
+  const sel = new Set(selected);
+  if (toRight) {
+    // available → chosen (끝에 추가, 원본 순서 유지)
+    for (const name of _availableItems) {
+      if (sel.has(name) && !_chosenItems.includes(name)) _chosenItems.push(name);
+    }
+  } else {
+    // chosen → available (제거)
+    _chosenItems = _chosenItems.filter(n => !sel.has(n));
+  }
+  renderDualList();
+}
+
+document.getElementById("dlAddBtn").addEventListener("click",
+  () => moveSelected(dlAvailable, true));
+document.getElementById("dlRemoveBtn").addEventListener("click",
+  () => moveSelected(dlSelected, false));
+document.getElementById("dlAddAllBtn").addEventListener("click", () => {
+  _chosenItems = _availableItems.slice();
+  renderDualList();
+});
+document.getElementById("dlRemoveAllBtn").addEventListener("click", () => {
+  _chosenItems = [];
+  renderDualList();
+});
+// 더블클릭으로도 이동
+dlAvailable.addEventListener("dblclick", () => moveSelected(dlAvailable, true));
+dlSelected.addEventListener("dblclick", () => moveSelected(dlSelected, false));
+
+document.getElementById("optModalBack").addEventListener("click", () => {
+  closeOptionsModal();
+  fileModal.classList.add("open");
+  fileStartBtn.disabled = !_selectedFiles.length;
 });
 
-async function runExecute(password) {
+optionsModal.addEventListener("click", e => {
+  if (e.target === optionsModal) closeOptionsModal();
+});
+
+document.getElementById("optModalConfirm").addEventListener("click", async () => {
+  if (!_chosenItems.length) {
+    showToast("최소 한 개의 Item 을 오른쪽으로 옮기세요.", true);
+    return;
+  }
+  const analyses = Array.from(
+    document.querySelectorAll("#analysisTypes input[type=checkbox]:checked")
+  ).map(cb => cb.value);
+  if (!analyses.length) {
+    showToast("최소 한 개의 분석 종류를 선택하세요.", true);
+    return;
+  }
+  const pwRaw = document.getElementById("optPw").value.trim();
+  if (pwRaw && !/^\d{4}$/.test(pwRaw)) {
+    showToast("비밀번호는 숫자 4자리여야 합니다.", true);
+    return;
+  }
+  closeOptionsModal();
+  await runExecute({
+    files: _selectedFiles.slice(),
+    selectedItems: _chosenItems.slice(),
+    analyses,
+    password: pwRaw || null,
+  });
+});
+
+async function runExecute({ files, selectedItems, analyses, password }) {
   executeBtn.classList.add("loading");
   executeBtn.disabled = true;
 
-  const body = { product_type: state.productType };
-  if (password) body.password = password;
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f, f.name);
+  fd.append("product_type", state.productType || "");
+  fd.append("options", JSON.stringify({
+    selected_items: selectedItems,
+    analyses,
+  }));
+  if (password) fd.append("password", password);
 
   try {
-    const res = await fetch("/pe/report/execute-debug", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const res = await fetch("/pe/report/execute", { method: "POST", body: fd });
     if (!res.ok) {
       let msg = null;
       try { msg = (await res.json()).error; } catch { /* HTML response */ }

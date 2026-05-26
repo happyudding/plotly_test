@@ -336,6 +336,35 @@ def _write_singleton_dict(dataset_id, kind, data):
     report_db.replace_dashboard_comments(dataset_id, kind, payload)
 
 
+# ── 전체 테이블 데이터(JSON 리스트)를 통째로 박제/복원 ─────────────────────
+#   dashboard 의 모든 셀이 편집 가능하므로, baseline 과 diff 하지 않고
+#   사용자 수정 후의 data 전체를 저장한다. 다음 로드시 그 값을 그대로 표시.
+def _read_table_rows(dataset_id, kind):
+    data = report_db.get_dashboard_comments(dataset_id, kind)
+    raw = data.get(_SINGLETON_KEY) if data else None
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, list) else None
+
+
+def _write_table_rows(dataset_id, kind, rows):
+    payload = {_SINGLETON_KEY: json.dumps(rows or [], ensure_ascii=False, separators=(",", ":"))}
+    report_db.replace_dashboard_comments(dataset_id, kind, payload)
+
+
+# 박제 kind 들 — render_tab 및 save callback 에서 공유
+TABLE_KIND_YIELD       = "yield_data_full"
+TABLE_KIND_CPK         = "cpk_data_full"
+TABLE_KIND_FAIL_VALUES = "fail_values_data_full"
+TABLE_KIND_ISSUE       = "issue_data_full"
+TABLE_KIND_SUMMARY_YIELD = "summary_yield_data_full"
+TABLE_KIND_SUMMARY_EVAL  = "summary_eval_data_full"
+
+
 def _read_yield_comments(dataset_id):
     return _read_flat_comments(dataset_id, "yield_comment", "yield_comments.json")
 
@@ -668,39 +697,47 @@ def register_dash(app):
             }
 
             # ── Yield Summary ─────────────────────────────────────────────────
-            smry_comments = _read_summary_comments(dataset_id)
-            try:
-                _sess_meta = report_db.get_session_by_dataset_id(dataset_id)
-                lot_id_val = (_sess_meta or {}).get("lot_id") or "-"
-            except Exception:
-                lot_id_val = "-"
-            _ordinals = ["1st", "2nd", "3rd", "4th", "5th"]
-            yield_summary_rows = []
-            for i, r in enumerate(non_pass[:5], 1):
-                st = str(r.get("bin", ""))
-                fail_subjects = r.get("fail_subjects") or []
-                main_fail = (fail_subjects[0].get("subject", "N/A")
-                             if fail_subjects else r.get("Main Fail subject", "N/A"))
-                portion = r.get("portion (%)", "")
-                pct_str = f"{portion}%" if portion != "" else ""
-                yield_summary_rows.append({
-                    "lotid":             lot_id_val if i == 1 else "",
-                    "yield":             pass_yield_str if i == 1 else "",
-                    "mfy_rank":          _ordinals[i - 1],
-                    "mfy_subject":       main_fail,
-                    "mfy_pct":           pct_str,
-                    "comment":           smry_comments.get(st, ""),
-                    "_key":              st,
-                })
+            saved_sy = _read_table_rows(dataset_id, TABLE_KIND_SUMMARY_YIELD)
+            if saved_sy is not None:
+                yield_summary_rows = saved_sy
+            else:
+                smry_comments = _read_summary_comments(dataset_id)
+                try:
+                    _sess_meta = report_db.get_session_by_dataset_id(dataset_id)
+                    lot_id_val = (_sess_meta or {}).get("lot_id") or "-"
+                except Exception:
+                    lot_id_val = "-"
+                _ordinals = ["1st", "2nd", "3rd", "4th", "5th"]
+                yield_summary_rows = []
+                for i, r in enumerate(non_pass[:5], 1):
+                    st = str(r.get("bin", ""))
+                    fail_subjects = r.get("fail_subjects") or []
+                    main_fail = (fail_subjects[0].get("subject", "N/A")
+                                 if fail_subjects else r.get("Main Fail subject", "N/A"))
+                    portion = r.get("portion (%)", "")
+                    pct_str = f"{portion}%" if portion != "" else ""
+                    yield_summary_rows.append({
+                        "lotid":             lot_id_val if i == 1 else "",
+                        "yield":             pass_yield_str if i == 1 else "",
+                        "mfy_rank":          _ordinals[i - 1],
+                        "mfy_subject":       main_fail,
+                        "mfy_pct":           pct_str,
+                        "comment":           smry_comments.get(st, ""),
+                        "_key":              st,
+                    })
 
             # ── Evaluation Summary ────────────────────────────────────────────
-            eval_data = _read_summary_eval(dataset_id)
-            eval_rows = [
-                {"category": "Yield", "condition_limit": eval_data.get("yield_cond", ""), "result": eval_data.get("yield",  "")},
-                {"category": "CPK",   "condition_limit": eval_data.get("cpk_cond",   ""), "result": eval_data.get("cpk",    "")},
-                {"category": "Temp",  "condition_limit": eval_data.get("temp_cond",  ""), "result": eval_data.get("temp",   "")},
-                {"category": "ETC",   "condition_limit": eval_data.get("etc_cond",   ""), "result": eval_data.get("etc",    "")},
-            ]
+            saved_eval = _read_table_rows(dataset_id, TABLE_KIND_SUMMARY_EVAL)
+            if saved_eval is not None:
+                eval_rows = saved_eval
+            else:
+                eval_data = _read_summary_eval(dataset_id)
+                eval_rows = [
+                    {"category": "Yield", "condition_limit": eval_data.get("yield_cond", ""), "result": eval_data.get("yield",  "")},
+                    {"category": "CPK",   "condition_limit": eval_data.get("cpk_cond",   ""), "result": eval_data.get("cpk",    "")},
+                    {"category": "Temp",  "condition_limit": eval_data.get("temp_cond",  ""), "result": eval_data.get("temp",   "")},
+                    {"category": "ETC",   "condition_limit": eval_data.get("etc_cond",   ""), "result": eval_data.get("etc",    "")},
+                ]
 
             _hdr = {"fontWeight": 600, "background": "#f6f7f9", "fontSize": 11,
                     "padding": "4px 8px", "textAlign": "center"}
@@ -715,15 +752,15 @@ def register_dash(app):
                 dash_table.DataTable(
                     id="summary-feature-table",
                     columns=[
-                        {"name": "subject",        "id": "subject",       "editable": True},
-                        {"name": "Customer Type",  "id": "customer_type", "editable": True},
-                        {"name": "GD",             "id": "gd",            "editable": True},
-                        {"name": "Process",        "id": "process",       "editable": True},
-                        {"name": "Line",           "id": "line",          "editable": True},
-                        {"name": "version",        "id": "version",       "editable": True},
+                        {"name": "subject",        "id": "subject"},
+                        {"name": "Customer Type",  "id": "customer_type"},
+                        {"name": "GD",             "id": "gd"},
+                        {"name": "Process",        "id": "process"},
+                        {"name": "Line",           "id": "line"},
+                        {"name": "version",        "id": "version"},
                     ],
                     data=[feature_row],
-                    editable=False,
+                    editable=True,
                     sort_action="none",
                     filter_action="none",
                     style_table={"overflowX": "auto", "marginBottom": "24px"},
@@ -746,7 +783,7 @@ def register_dash(app):
                     ],
                     data=yield_summary_rows,
                     merge_duplicate_headers=True,
-                    editable=False,
+                    editable=True,
                     sort_action="none",
                     filter_action="none",
                     style_table={"overflowX": "auto", "marginBottom": "8px"},
@@ -783,11 +820,11 @@ def register_dash(app):
                     id="summary-eval-table",
                     columns=[
                         {"name": "Category",             "id": "category"},
-                        {"name": "Condition * Judge Limit", "id": "condition_limit", "editable": True},
-                        {"name": "Result",               "id": "result",  "editable": True},
+                        {"name": "Condition * Judge Limit", "id": "condition_limit"},
+                        {"name": "Result",               "id": "result"},
                     ],
                     data=eval_rows,
-                    editable=False,
+                    editable=True,
                     sort_action="none",
                     filter_action="none",
                     style_table={"overflowX": "auto", "maxWidth": "900px", "marginBottom": "8px"},
@@ -808,14 +845,18 @@ def register_dash(app):
         if tab == "yield":
             rows = tables.get("yield") or []
             sources = (tables.get("meta") or {}).get("sources") or []
-            comments = _read_yield_comments(dataset_id)
-            merged = []
-            for row in rows:
-                row = dict(row)
-                key = str(row.get("bin", ""))
-                row["comment"] = comments.get(key, row.get("comment", "") or "")
-                merged.append(row)
-            merged.sort(key=_yield_sort_key)
+            saved_rows = _read_table_rows(dataset_id, TABLE_KIND_YIELD)
+            if saved_rows is not None:
+                merged = saved_rows
+            else:
+                comments = _read_yield_comments(dataset_id)
+                merged = []
+                for row in rows:
+                    row = dict(row)
+                    key = str(row.get("bin", ""))
+                    row["comment"] = comments.get(key, row.get("comment", "") or "")
+                    merged.append(row)
+                merged.sort(key=_yield_sort_key)
 
             return html.Div([
                 html.Div("Yield", className="section-title"),
@@ -830,7 +871,7 @@ def register_dash(app):
                     page_size=50,
                     sort_action="none",
                     filter_action="none",
-                    editable=False,
+                    editable=True,
                     cell_selectable=True,
                     selected_cells=[],
                     style_table={"overflowX": "auto", "minWidth": "100%"},
@@ -872,11 +913,15 @@ def register_dash(app):
                 html.Div(id="yield-save-status", className="save-status"),
             ])
         if tab == "cpk":
-            raw_cpk = tables.get("cpk") or []
-            cpk_comments = _read_cpk_comments(dataset_id)
-            for r in raw_cpk:
-                r["comment"] = cpk_comments.get(_cpk_comment_key(r.get("subject"), r.get("source")), "")
-            rows = _merge_cpk_subject(raw_cpk)
+            saved_rows = _read_table_rows(dataset_id, TABLE_KIND_CPK)
+            if saved_rows is not None:
+                rows = saved_rows
+            else:
+                raw_cpk = tables.get("cpk") or []
+                cpk_comments = _read_cpk_comments(dataset_id)
+                for r in raw_cpk:
+                    r["comment"] = cpk_comments.get(_cpk_comment_key(r.get("subject"), r.get("source")), "")
+                rows = _merge_cpk_subject(raw_cpk)
             return html.Div([
                 html.Div("CPK", className="section-title"),
                 html.Div([
@@ -904,7 +949,7 @@ def register_dash(app):
                         page_size=200,
                         sort_action="none",
                         filter_action="none",
-                        editable=False,
+                        editable=True,
                         fixed_rows={"headers": True},
                         style_table={"overflowX": "auto", "minWidth": "100%", "height": "calc(100vh - 200px)"},
                         style_cell={
@@ -929,10 +974,14 @@ def register_dash(app):
             rows = fail_items.get("rows", [])
 
             # ── Fail Values: per-DUT per-subject fail records ──────────────
-            try:
-                fv_rows = get_fail_values(dataset_id)
-            except Exception:
-                fv_rows = []
+            saved_fv = _read_table_rows(dataset_id, TABLE_KIND_FAIL_VALUES)
+            if saved_fv is not None:
+                fv_rows = saved_fv
+            else:
+                try:
+                    fv_rows = get_fail_values(dataset_id)
+                except Exception:
+                    fv_rows = []
 
             fv_columns = [
                 {"name": "Source (Sheet)", "id": "source"},
@@ -1011,6 +1060,7 @@ def register_dash(app):
                         page_size=50,
                         sort_action="native",
                         filter_action="native",
+                        editable=True,
                         style_table={"overflowX": "auto", "minWidth": "100%"},
                         style_cell={
                             "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
@@ -1025,13 +1075,18 @@ def register_dash(app):
                         style_header={"fontWeight": 600, "background": "#f6f7f9", "fontSize": 11},
                     ),
                 ),
+                html.Div(id="fail-values-save-status", className="save-status"),
             ])
         if tab == "issues":
             fail_items = tables.get("fail_items") or {"rows": []}
             sources = (tables.get("meta") or {}).get("sources") or []
-            issue_comments = _read_issue_comments(dataset_id)
-            rows = _project_issue_rows(fail_items, sources, issue_comments, dataset_id)
-            rows.sort(key=_yield_sort_key)
+            saved_issue = _read_table_rows(dataset_id, TABLE_KIND_ISSUE)
+            if saved_issue is not None:
+                rows = saved_issue
+            else:
+                issue_comments = _read_issue_comments(dataset_id)
+                rows = _project_issue_rows(fail_items, sources, issue_comments, dataset_id)
+                rows.sort(key=_yield_sort_key)
             low_cpk_groups = _build_low_cpk_groups(
                 tables.get("cpk") or [],
                 (tables.get("meta") or {}).get("subjects") or [],
@@ -1054,7 +1109,7 @@ def register_dash(app):
                     page_size=200,
                     sort_action="none",
                     filter_action="none",
-                    editable=False,
+                    editable=True,
                     fixed_columns={"headers": True, "data": 1},
                     fixed_rows={"headers": True},
                     markdown_options={"html": False},
@@ -1136,16 +1191,10 @@ def register_dash(app):
         prevent_initial_call=True,
     )
     def save_summary_yield_comments(_ts, data, dataset_id):
-        if not dataset_id or not data:
+        if not dataset_id or data is None:
             return ""
-        payload = {}
-        for row in data:
-            key = str(row.get("_key", "")).strip()
-            comment = (row.get("comment") or "").strip()
-            if key and comment:
-                payload[key] = comment
-        _write_summary_comments(dataset_id, payload)
-        return f"saved {len(payload)} comment(s)"
+        _write_table_rows(dataset_id, TABLE_KIND_SUMMARY_YIELD, data)
+        return f"saved {len(data)} row(s)"
 
     @dash_app.callback(
         Output("summary-eval-save-status", "children"),
@@ -1155,16 +1204,10 @@ def register_dash(app):
         prevent_initial_call=True,
     )
     def save_summary_eval(_ts, data, dataset_id):
-        if not dataset_id or not data:
+        if not dataset_id or data is None:
             return ""
-        payload = {}
-        for row in data:
-            cat = (row.get("category") or "").lower()
-            if cat:
-                payload[cat]            = (row.get("result")          or "").strip()
-                payload[f"{cat}_cond"]  = (row.get("condition_limit") or "").strip()
-        _write_summary_eval(dataset_id, payload)
-        return "saved"
+        _write_table_rows(dataset_id, TABLE_KIND_SUMMARY_EVAL, data)
+        return f"saved {len(data)} row(s)"
 
     @dash_app.callback(
         Output("yield-save-status", "children"),
@@ -1174,16 +1217,10 @@ def register_dash(app):
         prevent_initial_call=True,
     )
     def save_yield_comments(_ts, data, dataset_id):
-        if not dataset_id or not data:
+        if not dataset_id or data is None:
             return ""
-        payload = {}
-        for row in data:
-            key = str(row.get("bin", "")).strip()
-            comment = (row.get("comment") or "").strip()
-            if key and comment:
-                payload[key] = comment
-        _write_yield_comments(dataset_id, payload)
-        return f"saved {len(payload)} comment(s)"
+        _write_table_rows(dataset_id, TABLE_KIND_YIELD, data)
+        return f"saved {len(data)} row(s)"
 
     # ── Yield 탭: Excel-like 셀 선택 집계 (clientside, 서버 부하 0) ──────────
     dash_app.clientside_callback(
@@ -1239,21 +1276,10 @@ def register_dash(app):
         prevent_initial_call=True,
     )
     def save_cpk_comments(_ts, data, dataset_id):
-        if not dataset_id or not data:
+        if not dataset_id or data is None:
             return ""
-        payload = {}
-        prev_subject = ""
-        for row in data:
-            s = (row.get("subject") or "").strip()
-            if s:
-                prev_subject = s
-            subject = prev_subject
-            source = (row.get("source") or "").strip()
-            comment = (row.get("comment") or "").strip()
-            if subject and source and comment:
-                payload[_cpk_comment_key(subject, source)] = comment
-        _write_cpk_comments(dataset_id, payload)
-        return f"saved {len(payload)} comment(s)"
+        _write_table_rows(dataset_id, TABLE_KIND_CPK, data)
+        return f"saved {len(data)} row(s)"
 
     @dash_app.callback(
         Output("issue-save-status", "children"),
@@ -1263,23 +1289,24 @@ def register_dash(app):
         prevent_initial_call=True,
     )
     def save_issue_comments(_ts, data, dataset_id):
-        if not dataset_id or not data:
+        if not dataset_id or data is None:
             return ""
-        payload = {}
-        for row in data:
-            key = str(row.get("bin", "")).strip()
-            if not key:
-                continue
-            entry = {
-                "issue_point": (row.get("issue_point") or "").strip(),
-                "comment": (row.get("issue_comment") or "").strip(),
-                "dev_comment": (row.get("dev_comment") or "").strip(),
-                "pte_comment": (row.get("pte_comment") or "").strip(),
-            }
-            if any(entry.values()):
-                payload[key] = entry
-        _write_issue_comments(dataset_id, payload)
-        return f"saved {len(payload)} row(s)"
+        _write_table_rows(dataset_id, TABLE_KIND_ISSUE, data)
+        return f"saved {len(data)} row(s)"
+
+    # Fail Values 테이블 — 전체 데이터 박제 저장
+    @dash_app.callback(
+        Output("fail-values-save-status", "children"),
+        Input("fail-values-table", "data_timestamp"),
+        State("fail-values-table", "data"),
+        State("dataset-id", "data"),
+        prevent_initial_call=True,
+    )
+    def save_fail_values(_ts, data, dataset_id):
+        if not dataset_id or data is None:
+            return ""
+        _write_table_rows(dataset_id, TABLE_KIND_FAIL_VALUES, data)
+        return f"saved {len(data)} row(s)"
 
     dash_app.clientside_callback(
         """

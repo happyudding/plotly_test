@@ -190,7 +190,7 @@ async function poll() {
       return;
     }
 
-    // build_status 확인 (dataset_id가 있는 execute-debug 세션)
+    // build_status 확인 (dataset_id가 있는 execute 세션)
     const buildOk = await checkBuild(_datasetId);
     if (buildOk) {
       if (session.status === "done" || session.status === "reused") {
