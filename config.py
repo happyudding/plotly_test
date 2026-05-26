@@ -6,7 +6,7 @@ INPUT_DIR = ROOT_DIR / "data"
 OUTPUT_DIR = ROOT_DIR / "output"
 DATASETS_DIR = OUTPUT_DIR / "datasets"
 UPLOAD_FORM_PATH = ROOT_DIR / "upload_form.html"
-SCHOOL_FILES_GLOB = "*_school.csv"
+SCHOOL_FILES_GLOB = "*_school*.csv"
 
 META_COLUMNS = ["DUT", "XCoord", "YCoord", "Bin"]
 N_META_COLUMNS = len(META_COLUMNS)

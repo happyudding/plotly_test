@@ -433,7 +433,7 @@ def execute_debug():
 
     debug_files = sorted(INPUT_DIR.glob(SCHOOL_FILES_GLOB))
     if not debug_files:
-        abort(400, f"디버그 CSV 파일을 찾을 수 없음: {INPUT_DIR}/{SCHOOL_FILES_GLOB}")
+        return jsonify({"error": f"디버그 CSV 파일을 찾을 수 없음: {INPUT_DIR}/{SCHOOL_FILES_GLOB}"}), 400
 
     dataset_id = f"{int(time.time())}_{secrets.token_hex(3)}"
     session_id = f"{int(time.time())}_{secrets.token_hex(3)}"

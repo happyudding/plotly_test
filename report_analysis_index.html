@@ -304,8 +304,12 @@ async function runExecute() {
 
   try {
     const res = await fetch("/pe/report/execute-debug", { method: "POST", body: fd });
+    if (!res.ok) {
+      let msg = null;
+      try { msg = (await res.json()).error; } catch { /* HTML response */ }
+      throw new Error(msg || `서버 오류 ${res.status}`);
+    }
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.statusText);
     showToast(`빌드 시작: ${data.session_id}`);
     location.href = "/pe/report/view/" + data.session_id;
   } catch (e) {
