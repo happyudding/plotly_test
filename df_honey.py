@@ -4,12 +4,12 @@ import numpy as np
 import pandas as pd
 
 from config import (
-    HI_LIMIT_ROW, LO_LIMIT_ROW, META_COLUMNS, N_META_COLUMNS,
-    STUDENT_DATA_START_ROW, SUBJECT_NAME_ROW, UNIT_ROW,
+    UPPER_LIMIT_ROW, LOWER_LIMIT_ROW, META_COLUMNS, N_META_COLUMNS,
+    DATA_START_ROW, SUBJECT_NAME_ROW, UNITS_ROW,
 )
 from preprocess import cumulative_distribution_full, to_numeric_clean
 from table_builder import (
-    PASS_STUDENT_TYPE,
+    PASS_BIN,
     _build_cpk,
     _build_fail_items,
     _build_yield,
@@ -22,14 +22,14 @@ from table_builder import (
 class df_honey:
     """단일 파일/df 단위 분석 객체. ExcelData 속성과 호환되어 table_builder 함수와 바로 연동."""
 
-    def __init__(self, name, subjects, units, lo_limits, hi_limits, scores, meta):
+    def __init__(self, name, subjects, units, lower_limits, upper_limits, scores, meta):
         self.name = name
         self.subjects = subjects
         self.units = units
-        self.lo_limits = lo_limits
-        self.hi_limits = hi_limits
+        self.lower_limits = lower_limits
+        self.upper_limits = upper_limits
         self.scores = scores    # int-indexed columns (0, 1, 2, ...)
-        self.meta = meta        # columns: call, grade, class, student_type
+        self.meta = meta        # columns: DUT, XCoord, YCoord, Bin
 
     @classmethod
     def from_file(cls, path) -> "df_honey":
@@ -41,8 +41,8 @@ class df_honey:
             name=path.stem,
             subjects=exc.subjects,
             units=exc.units,
-            lo_limits=exc.lo_limits,
-            hi_limits=exc.hi_limits,
+            lower_limits=exc.lower_limits,
+            upper_limits=exc.upper_limits,
             scores=exc.scores,
             meta=exc.meta,
         )
@@ -52,16 +52,16 @@ class df_honey:
         """Raw DataFrame (CSV와 동일한 포맷, header=None으로 읽은 상태) → df_honey."""
         row = lambda r: df.iloc[r, N_META_COLUMNS:]
         subjects = [str(s) for s in row(SUBJECT_NAME_ROW).tolist()]
-        units = [str(u) if pd.notna(u) else "" for u in row(UNIT_ROW).tolist()]
-        lo = pd.to_numeric(row(LO_LIMIT_ROW), errors="coerce").tolist()
-        hi = pd.to_numeric(row(HI_LIMIT_ROW), errors="coerce").tolist()
-        block = df.iloc[STUDENT_DATA_START_ROW:].reset_index(drop=True)
+        units = [str(u) if pd.notna(u) else "" for u in row(UNITS_ROW).tolist()]
+        lo = pd.to_numeric(row(LOWER_LIMIT_ROW), errors="coerce").tolist()
+        hi = pd.to_numeric(row(UPPER_LIMIT_ROW), errors="coerce").tolist()
+        block = df.iloc[DATA_START_ROW:].reset_index(drop=True)
         meta = block.iloc[:, :N_META_COLUMNS].copy()
         meta.columns = META_COLUMNS
         scores = block.iloc[:, N_META_COLUMNS:].copy()
         scores.columns = range(len(subjects))
         return cls(name=name, subjects=subjects, units=units,
-                   lo_limits=lo, hi_limits=hi, scores=scores, meta=meta)
+                   lower_limits=lo, upper_limits=hi, scores=scores, meta=meta)
 
     # ------------------------------------------------------------------
     # internal
@@ -81,7 +81,7 @@ class df_honey:
         return [r for r in rows if r["subject"] == subject]
 
     def yield_rate(self) -> list:
-        """student_type별 수율 breakdown."""
+        """Bin별 수율 breakdown."""
         return _build_yield(self._as_schools())
 
     def distribution(self, subject_idx) -> tuple:
@@ -94,14 +94,14 @@ class df_honey:
         return _build_fail_items(self._as_schools())
 
     def fail_values(self) -> list:
-        """비합격 학생별 벗어난 측정값 상세 (lo/hi 초과 레코드)."""
+        """비합격 DUT별 벗어난 측정값 상세 (lower/upper limit 초과 레코드)."""
         subjects_list = _subject_columns(self)
         n_sub = len(subjects_list)
 
         meta = self.meta.reset_index(drop=True).copy()
-        meta["student_type"] = meta["student_type"].map(_fmt_type)
+        meta["Bin"] = meta["Bin"].map(_fmt_type)
 
-        non_pass_mask = meta["student_type"] != PASS_STUDENT_TYPE
+        non_pass_mask = meta["Bin"] != PASS_BIN
         if not non_pass_mask.any():
             return []
 
@@ -109,8 +109,8 @@ class df_honey:
         scores_np = self.scores[non_pass_mask].reset_index(drop=True)
         numeric = scores_np.apply(pd.to_numeric, errors="coerce")
 
-        lo_arr = [self.lo_limits[i] if i < len(self.lo_limits) else None for i in range(n_sub)]
-        hi_arr = [self.hi_limits[i] if i < len(self.hi_limits) else None for i in range(n_sub)]
+        lo_arr = [self.lower_limits[i] if i < len(self.lower_limits) else None for i in range(n_sub)]
+        hi_arr = [self.upper_limits[i] if i < len(self.upper_limits) else None for i in range(n_sub)]
 
         fail_lo = pd.DataFrame(False, index=numeric.index, columns=numeric.columns)
         fail_hi = pd.DataFrame(False, index=numeric.index, columns=numeric.columns)
@@ -136,14 +136,14 @@ class df_honey:
             meta_row = meta_np.iloc[row_i]
             rows.append({
                 "source": self.name,
-                "call": _fmt_type(meta_row["call"]),
-                "grade": _fmt_type(meta_row["grade"]),
-                "class": _fmt_type(meta_row["class"]),
-                "student_type": _fmt_type(meta_row["student_type"]),
+                "dut": _fmt_type(meta_row["DUT"]),
+                "x_coord": _fmt_type(meta_row["XCoord"]),
+                "y_coord": _fmt_type(meta_row["YCoord"]),
+                "bin": _fmt_type(meta_row["Bin"]),
                 "subject": subjects_list[col_i],
                 "value": _fmt_num(numeric.at[row_i, col_i]),
-                "lo_limit": _fmt_num(lo) if (lo is not None and pd.notna(lo)) else "N/A",
-                "hi_limit": _fmt_num(hi) if (hi is not None and pd.notna(hi)) else "N/A",
+                "lower_limit": _fmt_num(lo) if (lo is not None and pd.notna(lo)) else "N/A",
+                "upper_limit": _fmt_num(hi) if (hi is not None and pd.notna(hi)) else "N/A",
                 "fail": "< lo" if is_lo else "> hi",
             })
         return rows
@@ -171,15 +171,15 @@ class df_honey_group:
     # 통합 분석
 
     def cpk(self) -> list:
-        """전체 school 통합 CPK (per-source + total 행 포함)."""
+        """전체 source 통합 CPK (per-source + total 행 포함)."""
         return _build_cpk(self._schools)
 
     def yield_rate(self) -> list:
-        """전체 school 통합 수율."""
+        """전체 source 통합 수율."""
         return _build_yield(self._schools)
 
     def fail_items(self) -> dict:
-        """전체 school 통합 fail item."""
+        """전체 source 통합 fail item."""
         return _build_fail_items(self._schools)
 
     def summary(self) -> list:
@@ -201,7 +201,7 @@ class df_honey_group:
         }
 
     def compare_cpk(self) -> pd.DataFrame:
-        """school별 CPK를 나란히 비교하는 DataFrame (index=subject, columns=source)."""
+        """source별 CPK를 나란히 비교하는 DataFrame (index=subject, columns=source)."""
         rows = _build_cpk(self._schools)
         df = pd.DataFrame(rows)
         return df.pivot_table(index="subject", columns="source", values="cpk", aggfunc="first")

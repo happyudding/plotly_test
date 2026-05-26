@@ -81,7 +81,7 @@ def _build_plotly_for_analysis(analysis_key, file_paths, options):
             })
         payload = build_payload(
             idx, first.subjects[idx], _idx_or(first.units, idx, ""),
-            _idx_or(first.lo_limits, idx), _idx_or(first.hi_limits, idx), traces,
+            _idx_or(first.lower_limits, idx), _idx_or(first.upper_limits, idx), traces,
         )
         items.append(payload)
 

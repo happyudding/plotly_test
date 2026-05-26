@@ -89,6 +89,18 @@ CREATE TABLE IF NOT EXISTS report_annotation (
 );
 CREATE INDEX IF NOT EXISTS idx_report_annotation_session
     ON report_annotation(session_id);
+
+CREATE TABLE IF NOT EXISTS report_dashboard_comment (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    dataset_id   TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    item_key     TEXT NOT NULL,
+    value        TEXT NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    UNIQUE(dataset_id, kind, item_key)
+);
+CREATE INDEX IF NOT EXISTS idx_report_dashboard_dataset
+    ON report_dashboard_comment(dataset_id, kind);
 """
 
 _SUMMARY_COLUMNS = (
@@ -233,6 +245,24 @@ def get_history(product_type=None, process=None, product=None, revision=None, li
     with get_conn() as conn:
         rows = conn.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_session_by_dataset_id(dataset_id):
+    """dataset_id 로 가장 최근 세션 1건과 총 CSV 크기를 함께 반환."""
+    sql = """
+        SELECT s.session_id, s.file_name, s.product_type, s.process, s.product,
+               s.revision, s.created_at, s.status, s.dataset_id, s.analysis_key,
+               COALESCE(SUM(c.file_size), 0) AS total_file_size
+        FROM report_session s
+        LEFT JOIN report_csv_files c ON c.analysis_key = s.analysis_key
+        WHERE s.dataset_id = ?
+        GROUP BY s.session_id
+        ORDER BY s.created_at DESC
+        LIMIT 1
+    """
+    with get_conn() as conn:
+        row = conn.execute(sql, (dataset_id,)).fetchone()
+    return _row(row)
 
 
 def get_session_path_by_analysis_key(analysis_key):
@@ -431,3 +461,40 @@ def update_annotation(annotation_id, content):
 def delete_annotation(annotation_id):
     with get_conn() as conn:
         conn.execute("DELETE FROM report_annotation WHERE id=?", (annotation_id,))
+
+
+# ── dashboard comments (Dash UI 편집 셀 저장소) ────────────────────────────────
+
+def get_dashboard_comments(dataset_id, kind):
+    """`(dataset_id, kind)` 에 속한 모든 행을 `{item_key: value}` 로 반환.
+    value 가 JSON 인 경우 호출 측에서 파싱."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT item_key, value FROM report_dashboard_comment "
+            "WHERE dataset_id=? AND kind=?",
+            (dataset_id, kind),
+        ).fetchall()
+    return {r["item_key"]: r["value"] for r in rows}
+
+
+def replace_dashboard_comments(dataset_id, kind, items):
+    """`(dataset_id, kind)` 의 모든 행을 `items` 로 치환 (DELETE + INSERT)."""
+    now = _now()
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM report_dashboard_comment WHERE dataset_id=? AND kind=?",
+            (dataset_id, kind),
+        )
+        if items:
+            payload = [
+                (dataset_id, kind, str(k), str(v), now)
+                for k, v in items.items()
+                if v not in (None, "")
+            ]
+            if payload:
+                conn.executemany(
+                    "INSERT INTO report_dashboard_comment "
+                    "(dataset_id, kind, item_key, value, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    payload,
+                )

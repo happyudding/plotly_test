@@ -10,7 +10,7 @@ call "%ROOT%terminate.bat"
 
 echo.
 echo Starting server on port %PORT%...
-start "plotly-dashboard" /D "%ROOT%" "%PYTHON%" "wsgi.py"
+start "plotly-dashboard" /D "%ROOT%" "%PYTHON%" -u "wsgi.py"
 
 timeout /t 2 /nobreak >nul
 

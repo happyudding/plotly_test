@@ -354,6 +354,53 @@ def view_page(session_id):
     return send_file(ROOT_DIR / "report_view.html")
 
 
+@report_bp.post("/_analyze-only")
+def debug_analyze_only():
+    """빌드 없이 분석만 단독 실행 (build_dataset과의 충돌 격리용).
+    동기 실행 — 결과 또는 에러를 즉시 반환."""
+    debug_files = sorted(INPUT_DIR.glob(SCHOOL_FILES_GLOB))
+    if not debug_files:
+        abort(400, f"디버그 CSV 없음: {INPUT_DIR}/{SCHOOL_FILES_GLOB}")
+    session_id = f"{int(time.time())}_analyzeonly_{secrets.token_hex(3)}"
+    report_db.create_session(
+        session_id=session_id,
+        file_name=",".join(p.name for p in debug_files),
+        file_path=str(INPUT_DIR),
+        product_type=None,
+    )
+    try:
+        result = get_or_compute_analysis(session_id, debug_files, {})
+        return jsonify({
+            "session_id": session_id,
+            "analysis_key": result["analysis_key"],
+            "reused": result["reused"],
+            "rows": len(result["summary"]),
+            "status": "ok",
+        })
+    except Exception as exc:
+        import traceback
+        return jsonify({
+            "session_id": session_id,
+            "status": "error",
+            "error": str(exc),
+            "trace": traceback.format_exc(),
+        }), 500
+
+
+@report_bp.get("/_threads")
+def debug_threads():
+    """모든 스레드의 stack trace 덤프. hang 진단용."""
+    import sys, threading, traceback
+    out = []
+    tid_to_name = {t.ident: t.name for t in threading.enumerate()}
+    for tid, frame in sys._current_frames().items():
+        name = tid_to_name.get(tid, "?")
+        out.append(f"=== Thread {tid} ({name}) ===")
+        out.append("".join(traceback.format_stack(frame)))
+    from flask import Response
+    return Response("\n".join(out), mimetype="text/plain; charset=utf-8")
+
+
 @report_bp.get("/api/history")
 def history():
     product_type = request.args.get("product_type") or None
@@ -403,38 +450,57 @@ def execute_debug():
         with _build_lock:
             _build_status[s["dataset_id"]] = s
 
+    def _run_analysis():
+        """report analysis를 빌드와 병렬로 실행."""
+        import traceback
+        print(f"[bg:{session_id}] analysis thread START", flush=True)
+        try:
+            result = get_or_compute_analysis(session_id, debug_files, {})
+            analysis_key = result["analysis_key"]
+            print(f"[bg:{session_id}] analysis done, S3 uploads next", flush=True)
+            try:
+                _upload_csvs_to_s3(debug_files, analysis_key)
+                upload_derived_if_absent(
+                    analysis_key, result["content_hash"], result["options_json"], debug_files,
+                )
+                print(f"[bg:{session_id}] S3 uploads done", flush=True)
+            except S3NotConfigured:
+                print(f"[bg:{session_id}] S3 not configured, skipping uploads", flush=True)
+            except Exception as s3exc:
+                print(f"[bg:{session_id}] S3 upload error: {s3exc}", flush=True)
+                traceback.print_exc()
+        except AnalysisLockTimeout as exc:
+            print(f"[bg:{session_id}] LOCK TIMEOUT: {exc}", flush=True)
+            report_db.update_session(session_id, status="failed", error_message=str(exc)[:500])
+        except (AnalysisError, Exception) as exc:
+            print(f"[bg:{session_id}] ANALYSIS FAIL: {type(exc).__name__}: {exc}", flush=True)
+            traceback.print_exc()
+            report_db.update_session(session_id, status="failed", error_message=str(exc)[:500])
+        print(f"[bg:{session_id}] analysis thread END", flush=True)
+
     def _bg():
-        # 1. cumulative dashboard 빌드
+        # report analysis 와 cumulative dashboard 빌드를 병렬로 실행
+        print(f"[bg:{session_id}] _bg start, spawning analysis thread", flush=True)
+        analysis_thread = threading.Thread(target=_run_analysis, daemon=True)
+        analysis_thread.start()
+
         try:
             _set_status({"dataset_id": dataset_id, "stage": "queued", "current": 0, "total": 0, "elapsed_s": 0})
+            print(f"[bg:{session_id}] build_dataset START", flush=True)
             r = build_dataset(dataset_id, inputs, progress_cb=_set_status)
+            print(f"[bg:{session_id}] build_dataset DONE in {r['elapsed_s']}s", flush=True)
             _set_status({
                 "dataset_id": dataset_id, "stage": "done",
                 "current": r["n_subjects"], "total": r["n_subjects"],
                 "elapsed_s": r["elapsed_s"],
             })
         except Exception as exc:
+            print(f"[bg:{session_id}] build_dataset FAIL: {exc}", flush=True)
             _set_status({"dataset_id": dataset_id, "stage": "error", "error": str(exc)})
 
-        # 2. report analysis (통계 요약, fail items, issue table → DB + S3)
-        try:
-            result = get_or_compute_analysis(session_id, debug_files, {})
-            analysis_key = result["analysis_key"]
-            try:
-                _upload_csvs_to_s3(debug_files, analysis_key)
-                upload_derived_if_absent(
-                    analysis_key, result["content_hash"], result["options_json"], debug_files,
-                )
-            except S3NotConfigured:
-                pass
-            except Exception:
-                pass
-        except AnalysisLockTimeout as exc:
-            report_db.update_session(session_id, status="failed", error_message=str(exc)[:500])
-            return
-        except (AnalysisError, Exception) as exc:
-            report_db.update_session(session_id, status="failed", error_message=str(exc)[:500])
-            return
+        print(f"[bg:{session_id}] waiting for analysis thread to finish...", flush=True)
+        analysis_thread.join()  # 빌드 완료 후 분석도 끝날 때까지 대기
+        print(f"[bg:{session_id}] _bg END", flush=True)
 
     threading.Thread(target=_bg, daemon=True).start()
 

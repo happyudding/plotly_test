@@ -1,11 +1,10 @@
-# 04. df_honey 라이브러리 블록
+# 04. df_honey 클래스 블록
 
-서버/HTTP 흐름 없이 **데이터프레임 1개 또는 여러 개에 대해 동일한 통계 분석을 직접 호출**할 수 있는 단일 객체 래퍼.
-`table_builder._build_cpk / _build_yield / _build_fail_items` 가 기대하는 `schools = {name: ExcelData}` 인터페이스를 흉내내어,
-report 모듈에서 쓰는 함수들을 노트북/스크립트에서 그대로 재사용하는 것이 목적.
+서버/HTTP 흐름 없이 **DataFrame 1개 또는 여러 개에 대해 동일한 통계 분석을 직접 호출**할 수 있는 분석 객체.
+`ExcelData` 속성과 호환되어 `table_builder` 함수들을 그대로 재사용하면서, 분석 능력을 메서드로 캡슐화한다.
 
 - **파일**: [df_honey.py](../df_honey.py)
-- **의존 함수**: [table_builder.py](../table_builder.py), [preprocess.py](../preprocess.py), [data_loader.py](../data_loader.py), [config.py](../config.py)
+- **의존**: [table_builder.py](../table_builder.py), [preprocess.py](../preprocess.py), [data_loader.py](../data_loader.py), [config.py](../config.py)
 
 ---
 
@@ -15,21 +14,22 @@ report 모듈에서 쓰는 함수들을 노트북/스크립트에서 그대로 �
 
 | 행 번호 | 내용 |
 |---------|------|
-| 0 | 과목명 (subject names) — meta 4개 이후 |
-| 1 | 단위 (units) |
-| 2 | LO_LIMIT (하한) |
-| 3 | HI_LIMIT (상한) |
-| 4 | (사용 안 함, 보통 비움) |
-| 5 | (사용 안 함) |
-| 6+ | 학생 데이터 — `STUDENT_DATA_START_ROW` |
+| 0 | 과목명 — meta 4컬럼 이후 |
+| 1 | Units |
+| 2 | Lower Limit |
+| 3 | Upper Limit |
+| 4, 5 | (사용 안 함) |
+| 6+ | DUT 데이터 (`DATA_START_ROW = 6`) |
 
-좌측 4 컬럼은 메타 (`META_COLUMNS = ["call", "grade", "class", "student_type"]`), 5번째 컬럼부터 과목 점수.
+좌측 4 컬럼: `META_COLUMNS = ["DUT", "XCoord", "YCoord", "Bin"]`. `Bin == "1"` 이 합격.
 
-> `STUDENT_DATA_START_ROW = 6` 인 점에 주의: 4행/5행은 의도적으로 건너뛴다. df_honey 에 raw df 를 직접 넣을 때 같은 구조여야 한다.
+`from_df` 에 넣는 DataFrame 은 **반드시 `header=None` 으로 읽은 raw 상태** 여야 한다.
 
 ---
 
-## 2. `df_honey` — 단일 파일 단위
+## 2. `df_honey` — 단일 파일 단위 분석 객체
+
+[df_honey.py:22](../df_honey.py#L22)
 
 ### 2.1 생성
 
@@ -37,41 +37,44 @@ report 모듈에서 쓰는 함수들을 노트북/스크립트에서 그대로 �
 from df_honey import df_honey
 
 # CSV / Excel 경로에서
-h = df_honey.from_file("data/a_school_updated_call.csv")
+h = df_honey.from_file("data/a_school.csv")          # from_file: line 35
 
 # header=None 으로 읽은 raw DataFrame 에서
 import pandas as pd
-df = pd.read_csv("...", header=None)
-h = df_honey.from_df(df, name="a_school")
+raw = pd.read_csv("...", header=None)
+h = df_honey.from_df(raw, name="a_school")            # from_df: line 51
 ```
 
-내부 속성:
-- `name` (str)
-- `subjects: list[str]`, `units: list[str]`
-- `lo_limits: list[float|nan]`, `hi_limits: list[float|nan]`
-- `scores: pd.DataFrame` (컬럼은 0..N-1 정수 인덱스)
-- `meta: pd.DataFrame` (컬럼: call/grade/class/student_type)
+내부 속성 (ExcelData 와 동일 → table_builder 함수와 바로 연동):
 
-`ExcelData` 와 호환되어 `table_builder` 가 `table.subjects / table.scores / ...` 를 그대로 사용할 수 있다.
+| 속성 | 타입 | 내용 |
+|------|------|------|
+| `name` | str | 파일 stem (예: `"a_school"`) |
+| `subjects` | list[str] | 과목명 목록 |
+| `units` | list[str] | 단위 목록 |
+| `lower_limits` | list | 하한 (float or nan) |
+| `upper_limits` | list | 상한 |
+| `scores` | pd.DataFrame | 점수 (컬럼 0..N-1 정수 인덱스) |
+| `meta` | pd.DataFrame | DUT / XCoord / YCoord / Bin |
 
 ### 2.2 분석 메서드
 
-| 메서드 | 반환 | 설명 |
-|--------|------|------|
-| `.cpk(subject_idx=None)` | `list[dict]` | CPK 통계 (subject별). idx 지정 시 해당 과목만 |
-| `.yield_rate()` | `list[dict]` | student_type 별 count/portion/Main Fail subject |
-| `.fail_items()` | `dict` | yield + fail subject 목록 (UI 표시용) |
-| `.fail_values()` | `list[dict]` | 비합격 학생 × 과목별 측정값/lo/hi/fail 방향 (issue table 와 같은 행 단위) |
-| `.distribution(subject_idx)` | `(xs, ys)` | 누적분포 numpy arrays |
-| `.summary()` | `list[dict]` | `build_summary_rows` 결과 — DB 저장 직전 행들 |
+| 메서드 | 반환 | 라인 | 설명 |
+|--------|------|------|------|
+| `.cpk(subject_idx=None)` | `list[dict]` | [L75](../df_honey.py#L75) | CPK 통계. idx 지정 시 해당 과목만, None 이면 전체 |
+| `.yield_rate()` | `list[dict]` | [L83](../df_honey.py#L83) | Bin 별 count / portion / Main Fail subject |
+| `.distribution(subject_idx)` | `(xs, ys)` ndarray | [L87](../df_honey.py#L87) | 누적분포 CDF |
+| `.fail_items()` | `dict` | [L92](../df_honey.py#L92) | yield + fail subject 목록 |
+| `.fail_values()` | `list[dict]` | [L96](../df_honey.py#L96) | 비합격 DUT × 과목별 측정값 / lower_limit / upper_limit / fail 방향 |
+| `.summary()` | `list[dict]` | [L151](../df_honey.py#L151) | `build_summary_rows` 결과 (DB 저장 직전 행) |
 
-내부적으로 모두 `self._as_schools()` 로 `{self.name: self}` dict 를 만들어 `_build_*` 호출.
+내부적으로 모두 `_as_schools()` → `{self.name: self}` dict 를 만들어 `_build_*` 호출.
 
 ---
 
 ## 3. `df_honey_group` — 여러 honey 묶음
 
-여러 학교를 비교/통합 분석할 때 사용.
+[df_honey.py:164](../df_honey.py#L164)
 
 ```python
 from df_honey import df_honey, df_honey_group
@@ -81,63 +84,69 @@ group = df_honey_group([
     df_honey.from_file("b_school.csv"),
     df_honey.from_file("c_school.csv"),
 ])
-
-group.cpk()                       # 전체 통합 CPK
-group.yield_rate()                # 전체 통합 수율
-group.fail_items()                # 전체 통합 fail items
-group.summary()                   # 통합 summary rows
-group.distribution(idx)           # {name: (xs, ys)} 모든 학교
-group.distribution(idx, "a_school")  # ("a_school" 만)
-group.compare_cpk()               # subject × source pivot DataFrame
-group.names()
-len(group)
 ```
 
-내부는 `self._schools = {name: honey}` dict. report 모듈이 사용하는 schools 구조와 동일.
+내부는 `self._schools = {h.name: h for h in honeys}` — report 모듈의 `schools` dict 와 동일 구조.
+
+| 메서드 | 반환 | 라인 | 설명 |
+|--------|------|------|------|
+| `.cpk()` | `list[dict]` | [L173](../df_honey.py#L173) | 전체 source 통합 CPK (per-source + total 행) |
+| `.yield_rate()` | `list[dict]` | [L177](../df_honey.py#L177) | 전체 source 통합 수율 |
+| `.fail_items()` | `dict` | [L181](../df_honey.py#L181) | 전체 source 통합 fail items |
+| `.summary()` | `list[dict]` | [L185](../df_honey.py#L185) | 통합 summary rows |
+| `.distribution(idx, school_name=None)` | `(xs,ys)` 또는 `dict` | [L190](../df_honey.py#L190) | school_name 지정 시 단일, None 이면 `{name:(xs,ys)}` |
+| `.compare_cpk()` | `pd.DataFrame` | [L203](../df_honey.py#L203) | subject × source pivot (source 간 CPK 비교) |
+| `.names()` | `list[str]` | [L209](../df_honey.py#L209) | source 이름 목록 |
+| `len(group)` | `int` | [L212](../df_honey.py#L212) | source 수 |
 
 ---
 
 ## 4. report 흐름과의 관계
 
-`/pe/report/analyze` 가 내부적으로 하는 일과 거의 같다:
-
 ```python
-# 서버 분석 흐름 (요약)
+# 서버 분석 흐름 (report_analysis_service.py)
 schools = {p.stem: load_table(p) for p in csv_paths}
 rows = build_summary_rows(schools)
-save_summary_batch(...)
+report_db.save_summary_batch(analysis_key, session_id, rows)
 
-# 동등한 df_honey 흐름
+# 동등한 df_honey 흐름 (서버 없이)
 group = df_honey_group([df_honey.from_file(p) for p in csv_paths])
 rows = group.summary()
-# rows 를 그대로 report_db.save_summary_batch 에 넣을 수 있음
+# rows 구조가 동일 → report_db.save_summary_batch 에 바로 사용 가능
 ```
 
-S3 / DB / 락 / analysis_key 캐시는 모두 service 레이어 (`report_analysis_service`) 가 담당.
-df_honey 는 **순수 계산만** — 서버 코드 없이 같은 결과 검증 / 시각화 노트북 등에 적합.
+df_honey 는 **순수 계산만** 담당. S3 / DB / 락 / analysis_key 캐시는 service 레이어가 처리.
 
 ---
 
 ## 5. 활용 예시
 
 ```python
-# 한 학교의 5번 과목 CPK 만
+# 특정 과목 CPK 만
 df_honey.from_file("a_school.csv").cpk(subject_idx=5)
 
-# fail 데이터만 빠르게 확인
+# 빠른 fail 확인
 h = df_honey.from_file("a_school.csv")
 print(len(h.fail_values()), "fail records")
 
-# 학교간 CPK 비교 pivot
-group.compare_cpk().to_csv("compare_cpk.csv")
+# source 간 CPK 비교 pivot
+group.compare_cpk()                         # pd.DataFrame
+group.compare_cpk().to_csv("compare.csv")
+
+# 과목 0의 분포 — source별
+for name, (xs, ys) in group.distribution(0).items():
+    print(name, xs.shape)
+
+# 특정 source 만
+xs, ys = group.distribution(0, school_name="a_school")
 ```
 
 ---
 
 ## 6. 주의
 
-- `from_df` 에 넣는 DataFrame 은 반드시 `header=None` 으로 읽어야 한다 (subject row 가 0행이어야 함).
-- `subject_idx` 는 항상 0부터 시작하는 정수 (subjects 리스트 인덱스). 과목명이 아님.
-- numeric 변환 실패값(`pd.to_numeric(errors='coerce')`)은 분석에서 자동 제외.
-- `_fmt_type` 이 정수형 student_type 을 문자열로 정규화 (예: `1.0` → `"1"`). `PASS_STUDENT_TYPE = "1"` 이 합격 기준.
-- df_honey 는 **report_object_info, report_session 등 DB 에 어떤 것도 쓰지 않는다.** 순수 메모리 분석.
+- `from_df` 입력은 `pd.read_csv(..., header=None)` 과 동일한 raw 구조여야 한다.
+- `subject_idx` 는 0-based 정수 (subjects 리스트 인덱스). 과목명 문자열이 아님.
+- `to_numeric(errors='coerce')` 로 변환 실패값은 분석에서 자동 제외.
+- `PASS_BIN = "1"` 이 합격 기준. `_fmt_type` 이 `1.0` → `"1"` 정규화.
+- df_honey 는 DB / S3 에 **아무것도 쓰지 않는다.** 순수 메모리 분석.

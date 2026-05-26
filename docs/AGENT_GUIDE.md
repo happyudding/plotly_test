@@ -74,25 +74,25 @@ plotly/
 | 행 | 내용 |
 |----|------|
 | 0 | 과목명 (4 메타컬럼 이후) |
-| 1 | 단위 |
-| 2 | LO_LIMIT |
-| 3 | HI_LIMIT |
+| 1 | Units |
+| 2 | Lower Limit |
+| 3 | Upper Limit |
 | 4, 5 | 빈 행 |
-| 6+ | 학생 데이터 |
+| 6+ | DUT 데이터 |
 
-좌측 4 컬럼: `call, grade, class, student_type`. `student_type == "1"` 이 합격 (PASS).
+좌측 4 컬럼: `DUT, XCoord, YCoord, Bin`. `Bin == "1"` 이 합격 (PASS).
 
 ### 2.2 메모리 객체 흐름
 
 ```
-load_table(csv_path) → ExcelData(subjects, units, lo_limits, hi_limits, scores, meta)
+load_table(csv_path) → ExcelData(subjects, units, lower_limits, upper_limits, scores, meta)
 schools = {file_stem: ExcelData, ...}                    ← report 모듈이 쓰는 인터페이스
 df_honey(name, ...) / df_honey_group([honey, ...])       ← 동일 인터페이스의 객체 wrapper
 
 table_builder:
-  _build_yield(schools)       → student_type별 count/portion
+  _build_yield(schools)       → Bin별 count/portion
   _build_cpk(schools)         → subject별 CPK 통계
-  _build_fail_items(schools)  → student_type×subject fail 카운트
+  _build_fail_items(schools)  → Bin×subject fail 카운트
   _fail_mask_for_table(table) → boolean DataFrame (lo< or >hi)
 ```
 
@@ -213,6 +213,10 @@ REPORT_THUMB_WORKERS       # 기본 8 (SVG 병렬 업로드)
 | CSV 입력 행 위치 상수 | [config.py:11-15](../config.py#L11-L15) |
 | ExcelData 정의 | [data_loader.py:12-19](../data_loader.py#L12-L19) |
 | Blueprint 등록 | [wsgi.py:1-15](../wsgi.py#L1-L15) |
+| df_honey class (단일 파일 분석 객체) | [df_honey.py:22](../df_honey.py#L22) |
+| df_honey.from_file / from_df | [df_honey.py:34-67](../df_honey.py#L34-L67) |
+| df_honey 분석 메서드 (cpk/yield/dist/fail) | [df_honey.py:75-155](../df_honey.py#L75-L155) |
+| df_honey_group (다중 비교/통합) | [df_honey.py:164](../df_honey.py#L164) |
 
 ---
 

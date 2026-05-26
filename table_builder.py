@@ -3,12 +3,13 @@ import math
 from io import BytesIO
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from config import DATASETS_DIR, META_COLUMNS
 
 JSON_KWARGS = {"ensure_ascii": False, "separators": (",", ":")}
-PASS_STUDENT_TYPE = "1"
+PASS_BIN = "1"
 
 
 def _json_safe(value):
@@ -61,7 +62,7 @@ def _combined_frames(schools):
         scores.columns = _subject_columns(table)
         frame = pd.concat([meta, scores], axis=1)
         frame.insert(0, "source_file", source_name)
-        frame["student_type"] = frame["student_type"].map(_fmt_type)
+        frame["Bin"] = frame["Bin"].map(_fmt_type)
         frames.append(frame)
     if not frames:
         return pd.DataFrame(columns=["source_file", *META_COLUMNS])
@@ -70,18 +71,27 @@ def _combined_frames(schools):
 
 def _fail_mask_for_table(table):
     numeric = table.scores.apply(pd.to_numeric, errors="coerce")
-    mask = pd.DataFrame(False, index=numeric.index, columns=numeric.columns)
-    for idx, col in enumerate(numeric.columns):
-        lo = table.lo_limits[idx] if idx < len(table.lo_limits) else None
-        hi = table.hi_limits[idx] if idx < len(table.hi_limits) else None
-        series = numeric[col]
-        col_mask = pd.Series(False, index=series.index)
-        if lo is not None and not pd.isna(lo):
-            col_mask = col_mask | (series < float(lo))
-        if hi is not None and not pd.isna(hi):
-            col_mask = col_mask | (series > float(hi))
-        mask[col] = col_mask.fillna(False)
-    return mask
+    arr = numeric.to_numpy(dtype="float64", copy=False)
+    n_sub = arr.shape[1]
+
+    def _lim(seq, i):
+        if i >= len(seq):
+            return np.nan
+        v = seq[i]
+        if v is None:
+            return np.nan
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return np.nan
+        return f
+
+    lo = np.array([_lim(table.lower_limits, i) for i in range(n_sub)], dtype="float64")
+    hi = np.array([_lim(table.upper_limits, i) for i in range(n_sub)], dtype="float64")
+
+    with np.errstate(invalid="ignore"):
+        fail = (arr < lo) | (arr > hi)
+    return pd.DataFrame(fail, index=numeric.index, columns=numeric.columns, copy=False)
 
 
 def _type_sort_key(value):
@@ -99,15 +109,15 @@ def _subject_rankings_by_type(schools):
     subject_names = _subject_columns(first)
     for _source_name, table in schools.items():
         fail_mask = _fail_mask_for_table(table)
-        student_types = table.meta["student_type"].map(_fmt_type)
-        for student_type in sorted(student_types.unique(), key=_type_sort_key):
-            rows = student_types == student_type
+        bin_types = table.meta["Bin"].map(_fmt_type)
+        for bin_type in sorted(bin_types.unique(), key=_type_sort_key):
+            rows = bin_types == bin_type
             row_count = int(rows.sum())
-            type_totals[student_type] = type_totals.get(student_type, 0) + row_count
-            if student_type == PASS_STUDENT_TYPE or row_count == 0:
+            type_totals[bin_type] = type_totals.get(bin_type, 0) + row_count
+            if bin_type == PASS_BIN or row_count == 0:
                 continue
             counts = fail_mask.loc[rows].sum(axis=0)
-            bucket = rankings.setdefault(student_type, {})
+            bucket = rankings.setdefault(bin_type, {})
             for sid, count in counts.items():
                 if int(count) <= 0:
                     continue
@@ -119,14 +129,14 @@ def _subject_rankings_by_type(schools):
                     "portion (%)": 0.0,
                 })
                 item["count"] += int(count)
-    for student_type, bucket in rankings.items():
-        total = type_totals.get(student_type, 0)
+    for bin_type, bucket in rankings.items():
+        total = type_totals.get(bin_type, 0)
         subjects = []
         for item in bucket.values():
             item["portion (%)"] = round(item["count"] / total * 100.0, 3) if total else 0.0
             subjects.append(item)
         subjects.sort(key=lambda x: (-x["portion (%)"], -x["count"], x["subject"]))
-        rankings[student_type] = subjects
+        rankings[bin_type] = subjects
     return rankings
 
 
@@ -141,28 +151,28 @@ def _build_yield(schools):
     per_file_total = {}
     per_file_type_count = {}
     for source_name, table in schools.items():
-        types = table.meta["student_type"].map(_fmt_type)
+        types = table.meta["Bin"].map(_fmt_type)
         per_file_total[source_name] = len(types)
         per_file_type_count[source_name] = types.value_counts(dropna=False).to_dict()
-    counts = combined["student_type"].map(_fmt_type).value_counts(dropna=False)
-    for student_type, count in counts.sort_index(key=lambda s: s.map(_type_sort_key)).items():
-        fail_subjects = subject_rankings.get(student_type, [])
+    counts = combined["Bin"].map(_fmt_type).value_counts(dropna=False)
+    for bin_type, count in counts.sort_index(key=lambda s: s.map(_type_sort_key)).items():
+        fail_subjects = subject_rankings.get(bin_type, [])
         portion_fields = {}
         portions = []
         for src in sources:
             file_total = per_file_total.get(src, 0)
-            file_count = int(per_file_type_count.get(src, {}).get(student_type, 0))
+            file_count = int(per_file_type_count.get(src, {}).get(bin_type, 0))
             portion = round(file_count / file_total * 100.0, 2) if file_total else 0.0
             portion_fields[f"portion_{src}"] = portion
             portions.append(portion)
         avg_portion = round(sum(portions) / len(portions), 2) if portions else 0.0
         rows.append({
-            "student_type": student_type,
+            "bin": bin_type,
             "count": int(count),
             "portion (%)": round(int(count) / total * 100.0, 2),
             **portion_fields,
             "avg": avg_portion,
-            "Main Fail subject": "Pass" if student_type == PASS_STUDENT_TYPE else (fail_subjects[0]["subject"] if fail_subjects else "N/A"),
+            "Main Fail subject": "Pass" if bin_type == PASS_BIN else (fail_subjects[0]["subject"] if fail_subjects else "N/A"),
             "comment": "",
         })
     return rows
@@ -202,8 +212,8 @@ def _build_cpk(schools):
     rows = []
     first = next(iter(schools.values()))
     for idx, subject in enumerate(first.subjects):
-        lo = first.lo_limits[idx] if idx < len(first.lo_limits) else None
-        hi = first.hi_limits[idx] if idx < len(first.hi_limits) else None
+        lo = first.lower_limits[idx] if idx < len(first.lower_limits) else None
+        hi = first.upper_limits[idx] if idx < len(first.upper_limits) else None
         unit = first.units[idx] if idx < len(first.units) else ""
         per_source = []
         for source_name, table in schools.items():
@@ -212,18 +222,18 @@ def _build_cpk(schools):
             rows.append({
                 "subject": subject,
                 "source": source_name,
-                "unit": unit,
-                "lo_limit": _fmt_num(lo),
-                "hi_limit": _fmt_num(hi),
+                "units": unit,
+                "lower_limit": _fmt_num(lo),
+                "upper_limit": _fmt_num(hi),
                 **_calc_stats(series, lo, hi),
             })
         total_series = pd.concat(per_source, ignore_index=True) if per_source else pd.Series(dtype=float)
         rows.append({
             "subject": subject,
             "source": "total",
-            "unit": unit,
-            "lo_limit": _fmt_num(lo),
-            "hi_limit": _fmt_num(hi),
+            "units": unit,
+            "lower_limit": _fmt_num(lo),
+            "upper_limit": _fmt_num(hi),
             **_calc_stats(total_series, lo, hi),
         })
     return rows
@@ -234,11 +244,11 @@ def _build_fail_items(schools):
     subject_rankings = _subject_rankings_by_type(schools)
     rows = []
     for row in yield_rows:
-        student_type = row["student_type"]
-        fail_subjects = [] if student_type == PASS_STUDENT_TYPE else subject_rankings.get(student_type, [])
+        bin_type = row["bin"]
+        fail_subjects = [] if bin_type == PASS_BIN else subject_rankings.get(bin_type, [])
         rows.append({
             **row,
-            "Fail Subjects": "Pass" if student_type == PASS_STUDENT_TYPE else ("N/A" if not fail_subjects else f"{len(fail_subjects)} subjects"),
+            "Fail Subjects": "Pass" if bin_type == PASS_BIN else ("N/A" if not fail_subjects else f"{len(fail_subjects)} subjects"),
             "fail_subjects": fail_subjects,
         })
     return {"rows": rows}
@@ -257,9 +267,9 @@ def build_table_artifacts(dataset_id, schools):
             {
                 "subject_id": idx,
                 "subject": subject,
-                "unit": first.units[idx] if idx < len(first.units) else "",
-                "lo_limit": _json_safe(first.lo_limits[idx] if idx < len(first.lo_limits) else None),
-                "hi_limit": _json_safe(first.hi_limits[idx] if idx < len(first.hi_limits) else None),
+                "units": first.units[idx] if idx < len(first.units) else "",
+                "lower_limit": _json_safe(first.lower_limits[idx] if idx < len(first.lower_limits) else None),
+                "upper_limit": _json_safe(first.upper_limits[idx] if idx < len(first.upper_limits) else None),
             }
             for idx, subject in enumerate(first.subjects)
         ],
@@ -322,12 +332,12 @@ def read_table_json(dataset_id, name):
 
 def build_fail_values(dataset_id: str) -> list:
     """
-    For every non-pass student (student_type != '1') in every input CSV,
-    find each subject whose measured value is outside [lo_limit, hi_limit].
+    For every non-pass DUT (Bin != '1') in every input CSV,
+    find each subject whose measured value is outside [lower_limit, upper_limit].
 
-    Returns a flat list of dicts — one entry per (student, failing subject):
-      source, call, grade, class, student_type,
-      subject, value, lo_limit, hi_limit, fail ("< lo" | "> hi")
+    Returns a flat list of dicts — one entry per (DUT, failing subject):
+      source, dut, x_coord, y_coord, bin,
+      subject, value, lower_limit, upper_limit, fail ("< lo" | "> hi")
     """
     from data_loader import load_table
 
@@ -339,25 +349,23 @@ def build_fail_values(dataset_id: str) -> list:
     all_rows = []
 
     for source_name, table in schools.items():
-        subjects_list = _subject_columns(table)   # [subj_name, ...] indexed 0..n-1
+        subjects_list = _subject_columns(table)
         n_sub = len(subjects_list)
 
         meta = table.meta.reset_index(drop=True).copy()
-        meta["student_type"] = meta["student_type"].map(_fmt_type)
+        meta["Bin"] = meta["Bin"].map(_fmt_type)
 
-        non_pass_mask = meta["student_type"] != PASS_STUDENT_TYPE
+        non_pass_mask = meta["Bin"] != PASS_BIN
         if not non_pass_mask.any():
             continue
 
         meta_np   = meta[non_pass_mask].reset_index(drop=True)
         scores_np = table.scores[non_pass_mask].reset_index(drop=True)
         numeric   = scores_np.apply(pd.to_numeric, errors="coerce")
-        # numeric columns are integer labels 0 .. n_sub-1
 
-        lo_arr = [table.lo_limits[i] if i < len(table.lo_limits) else None for i in range(n_sub)]
-        hi_arr = [table.hi_limits[i] if i < len(table.hi_limits) else None for i in range(n_sub)]
+        lo_arr = [table.lower_limits[i] if i < len(table.lower_limits) else None for i in range(n_sub)]
+        hi_arr = [table.upper_limits[i] if i < len(table.upper_limits) else None for i in range(n_sub)]
 
-        # Vectorised fail masks per direction
         fail_lo = pd.DataFrame(False, index=numeric.index, columns=numeric.columns)
         fail_hi = pd.DataFrame(False, index=numeric.index, columns=numeric.columns)
 
@@ -371,7 +379,6 @@ def build_fail_values(dataset_id: str) -> list:
 
         fail_any = fail_lo | fail_hi
 
-        # Stack wide mask → long index of (row_label, col_label) for True cells
         failing = fail_any.stack()
         failing = failing[failing]
         if len(failing) == 0:
@@ -387,14 +394,14 @@ def build_fail_values(dataset_id: str) -> list:
 
             all_rows.append({
                 "source":       source_name,
-                "call":         _fmt_type(meta_row["call"]),
-                "grade":        _fmt_type(meta_row["grade"]),
-                "class":        _fmt_type(meta_row["class"]),
-                "student_type": _fmt_type(meta_row["student_type"]),
+                "dut":          _fmt_type(meta_row["DUT"]),
+                "x_coord":      _fmt_type(meta_row["XCoord"]),
+                "y_coord":      _fmt_type(meta_row["YCoord"]),
+                "bin":          _fmt_type(meta_row["Bin"]),
                 "subject":      subj_name,
                 "value":        _fmt_num(val),
-                "lo_limit":     _fmt_num(lo) if (lo is not None and pd.notna(lo)) else "N/A",
-                "hi_limit":     _fmt_num(hi) if (hi is not None and pd.notna(hi)) else "N/A",
+                "lower_limit":  _fmt_num(lo) if (lo is not None and pd.notna(lo)) else "N/A",
+                "upper_limit":  _fmt_num(hi) if (hi is not None and pd.notna(hi)) else "N/A",
                 "fail":         "< lo" if is_lo else "> hi",
             })
 
@@ -430,7 +437,7 @@ def build_raw_xlsx(dataset_id):
             scores = table.scores.reset_index(drop=True).copy()
             scores.columns = _subject_columns(table)
             frame = pd.concat([meta, scores], axis=1)
-            frame["student_type"] = frame["student_type"].map(_fmt_type)
+            frame["Bin"] = frame["Bin"].map(_fmt_type)
 
             sheet = source_name[:31] or "sheet"
             base = sheet

@@ -101,7 +101,11 @@ def _try_int(value):
 # ---------- summary mapping ------------------------------------------------
 
 def _combined_fail_count(schools, subject_idx):
-    """subject 별, 전체 school 합산 fail count (lsl/usl 초과)."""
+    """subject 별, 전체 school 합산 fail count (lsl/usl 초과).
+
+    NOTE: 호출자가 매 subject 마다 mask 를 재계산하지 않도록 build_summary_rows
+    내부에서는 사전 캐싱된 합산을 사용한다. 본 함수는 외부 호환을 위해 유지.
+    """
     total_fail = 0
     total_rows = 0
     for table in schools.values():
@@ -120,11 +124,30 @@ def build_summary_rows(schools):
     yield_rows = _build_yield(schools)
     fail_items = _build_fail_items(schools)["rows"]
 
+    # subject 루프에서 _fail_mask_for_table 가 school 마다 매번 재계산되는 비용
+    # (이전: cpk_rows 길이 × school 수, 작은 입력에서도 600+회) 제거를 위한 사전 캐시.
+    _fail_sums = []
+    _fail_rows = []
+    for table in schools.values():
+        mask = _fail_mask_for_table(table)
+        _fail_sums.append(mask.sum(axis=0).to_numpy(dtype=int, copy=False))
+        _fail_rows.append(int(len(mask)))
+
+    def _combined_fail_count_cached(subject_idx):
+        total_fail = 0
+        total_rows = 0
+        for sums, n_rows in zip(_fail_sums, _fail_rows):
+            if subject_idx >= sums.shape[0]:
+                continue
+            total_fail += int(sums[subject_idx])
+            total_rows += n_rows
+        return total_fail, total_rows
+
     rows = []
 
     # 1) per-subject overall (bin_number=NULL)
     for idx, cpk in enumerate(cpk_rows):
-        fail_count, total_rows = _combined_fail_count(schools, idx)
+        fail_count, total_rows = _combined_fail_count_cached(idx)
         yield_pct = ((total_rows - fail_count) / total_rows * 100.0) if total_rows else None
         rows.append({
             "item_name": str(cpk["subject"]),
@@ -134,15 +157,15 @@ def build_summary_rows(schools):
             "cpk_val": _to_float(cpk.get("cpk")),
             "mean_val": _to_float(cpk.get("average")),
             "stdev_val": _to_float(cpk.get("stdev")),
-            "lsl": _to_float(cpk.get("lo_limit")),
-            "usl": _to_float(cpk.get("hi_limit")),
-            "unit": cpk.get("unit") or "",
+            "lsl": _to_float(cpk.get("lower_limit")),
+            "usl": _to_float(cpk.get("upper_limit")),
+            "unit": cpk.get("units") or "",
         })
 
     # 2) per-bin × item (fail_subjects 펼침)
     seen = set()  # (item_name, bin_number)
     for fail_row in fail_items:
-        bin_n = _try_int(fail_row.get("student_type"))
+        bin_n = _try_int(fail_row.get("bin"))
         if bin_n is None:
             continue
         for fs in fail_row.get("fail_subjects") or []:
@@ -166,7 +189,7 @@ def build_summary_rows(schools):
 
     # 3) bin 전체 (item_name = "__bin_total__") — yield row 자체 정보 보존
     for yrow in yield_rows:
-        bin_n = _try_int(yrow.get("student_type"))
+        bin_n = _try_int(yrow.get("bin"))
         if bin_n is None:
             continue
         rows.append({
@@ -188,8 +211,8 @@ def build_summary_rows(schools):
 # ---------- issue_table (fail_values) builder --------------------------------
 
 def _build_issue_table(schools):
-    """비합격 학생별 측정값 초과 레코드 (fail_values). 전 학교 통합."""
-    from table_builder import PASS_STUDENT_TYPE, _fmt_type, _fmt_num, _subject_columns
+    """비합격 DUT별 측정값 초과 레코드 (fail_values). 전 source 통합."""
+    from table_builder import PASS_BIN, _fmt_type, _fmt_num, _subject_columns
     import pandas as pd
 
     rows = []
@@ -197,15 +220,15 @@ def _build_issue_table(schools):
         subjects_list = _subject_columns(table)
         n_sub = len(subjects_list)
         meta = table.meta.reset_index(drop=True).copy()
-        meta["student_type"] = meta["student_type"].map(_fmt_type)
-        non_pass = meta["student_type"] != PASS_STUDENT_TYPE
+        meta["Bin"] = meta["Bin"].map(_fmt_type)
+        non_pass = meta["Bin"] != PASS_BIN
         if not non_pass.any():
             continue
         meta_np = meta[non_pass].reset_index(drop=True)
         scores_np = table.scores[non_pass].reset_index(drop=True)
         numeric = scores_np.apply(pd.to_numeric, errors="coerce")
-        lo_arr = [table.lo_limits[i] if i < len(table.lo_limits) else None for i in range(n_sub)]
-        hi_arr = [table.hi_limits[i] if i < len(table.hi_limits) else None for i in range(n_sub)]
+        lo_arr = [table.lower_limits[i] if i < len(table.lower_limits) else None for i in range(n_sub)]
+        hi_arr = [table.upper_limits[i] if i < len(table.upper_limits) else None for i in range(n_sub)]
         fail_lo = pd.DataFrame(False, index=numeric.index, columns=numeric.columns)
         fail_hi = pd.DataFrame(False, index=numeric.index, columns=numeric.columns)
         for idx in range(n_sub):
@@ -222,14 +245,14 @@ def _build_issue_table(schools):
             meta_row = meta_np.iloc[row_i]
             rows.append({
                 "source": source_name,
-                "call": _fmt_type(meta_row["call"]),
-                "grade": _fmt_type(meta_row["grade"]),
-                "class": _fmt_type(meta_row["class"]),
-                "student_type": _fmt_type(meta_row["student_type"]),
+                "dut": _fmt_type(meta_row["DUT"]),
+                "x_coord": _fmt_type(meta_row["XCoord"]),
+                "y_coord": _fmt_type(meta_row["YCoord"]),
+                "bin": _fmt_type(meta_row["Bin"]),
                 "subject": subjects_list[col_i],
                 "value": _fmt_num(numeric.at[row_i, col_i]),
-                "lo_limit": _fmt_num(lo_arr[col_i]) if (lo_arr[col_i] is not None and pd.notna(lo_arr[col_i])) else "N/A",
-                "hi_limit": _fmt_num(hi_arr[col_i]) if (hi_arr[col_i] is not None and pd.notna(hi_arr[col_i])) else "N/A",
+                "lower_limit": _fmt_num(lo_arr[col_i]) if (lo_arr[col_i] is not None and pd.notna(lo_arr[col_i])) else "N/A",
+                "upper_limit": _fmt_num(hi_arr[col_i]) if (hi_arr[col_i] is not None and pd.notna(hi_arr[col_i])) else "N/A",
                 "fail": "< lo" if is_lo else "> hi",
             })
     return rows
@@ -264,8 +287,8 @@ def _upload_svgs_for_subjects(analysis_key, schools, subject_ids):
             )
             traces.append({"school": name, "color": color_map[name], "xs": xs, "ys": ys})
         unit = _idx_or(first.units, idx, "")
-        lo = _idx_or(first.lo_limits, idx)
-        hi = _idx_or(first.hi_limits, idx)
+        lo = _idx_or(first.lower_limits, idx)
+        hi = _idx_or(first.upper_limits, idx)
         payload = build_payload(idx, first.subjects[idx], unit, lo, hi, traces)
         svg = build_subject_svg(
             idx, first.subjects[idx], unit, lo, hi, traces, payload["layout"]
@@ -353,14 +376,22 @@ def get_or_compute_analysis(session_id, file_paths, options):
     Returns: {"reused": bool, "analysis_key": str, "content_hash": str,
               "options_json": str, "summary": list[dict]}
     """
+    def _log(msg):
+        print(f"[analysis:{session_id}] {msg}", flush=True)
+
+    _log(f"START files={[str(p.name) for p in file_paths]}")
     file_paths = [Path(p) for p in file_paths]
     for p in file_paths:
         if not p.exists():
             raise AnalysisError(f"missing file: {p}")
 
+    _log("hashing files...")
+    t0 = time.time()
     content_hash = hash_files_streaming(file_paths)
+    _log(f"hashed in {time.time()-t0:.2f}s")
     options_json = normalize_options(options)
     analysis_key = compute_analysis_key(content_hash, options_json)
+    _log(f"analysis_key={analysis_key[:12]}...")
 
     report_db.update_session(
         session_id,
@@ -371,6 +402,7 @@ def get_or_compute_analysis(session_id, file_paths, options):
 
     # cache hit?
     if report_db.has_summary(analysis_key):
+        _log("cache hit (has_summary) → reused")
         report_db.update_session(session_id, status="reused")
         return {
             "reused": True,
@@ -383,8 +415,10 @@ def get_or_compute_analysis(session_id, file_paths, options):
     # lock 획득. 다른 워커가 계산중이면 대기 후 캐시 재조회.
     lock_owner = f"analyze:{session_id}"
     if not report_db.try_acquire_analysis_lock(analysis_key, lock_owner):
+        _log("lock busy → wait_for_summary")
         already_done = _wait_for_summary(analysis_key, lock_owner)
         if already_done:
+            _log("summary became available during wait → reused")
             report_db.update_session(session_id, status="reused")
             return {
                 "reused": True,
@@ -393,10 +427,14 @@ def get_or_compute_analysis(session_id, file_paths, options):
                 "options_json": options_json,
                 "summary": report_db.get_summary_by_analysis_key(analysis_key),
             }
+        _log("acquired lock after wait")
+    else:
+        _log("acquired lock immediately")
 
     # lock 보유 상태로 다시 한번 캐시 체크 (race 회피)
     try:
         if report_db.has_summary(analysis_key):
+            _log("cache hit on re-check → reused")
             report_db.update_session(session_id, status="reused")
             return {
                 "reused": True,
@@ -407,10 +445,23 @@ def get_or_compute_analysis(session_id, file_paths, options):
             }
 
         # 분석 실행 (기존 함수 wrap 만)
+        _log("loading CSV files (load_table)...")
+        t0 = time.time()
         schools = {p.stem: load_table(p) for p in sorted(file_paths, key=lambda x: x.name)}
+        _log(f"loaded {len(schools)} schools in {time.time()-t0:.2f}s")
+
+        _log("build_summary_rows...")
+        t0 = time.time()
         rows = build_summary_rows(schools)
+        _log(f"built {len(rows)} summary rows in {time.time()-t0:.2f}s")
+
+        _log("save_summary_batch...")
+        t0 = time.time()
         report_db.save_summary_batch(analysis_key, session_id, rows)
+        _log(f"saved in {time.time()-t0:.2f}s")
+
         report_db.update_session(session_id, status="done")
+        _log("DONE")
         return {
             "reused": False,
             "analysis_key": analysis_key,
@@ -419,6 +470,7 @@ def get_or_compute_analysis(session_id, file_paths, options):
             "summary": report_db.get_summary_by_analysis_key(analysis_key),
         }
     except Exception as exc:
+        _log(f"EXCEPTION: {type(exc).__name__}: {exc}")
         report_db.update_session(
             session_id,
             status="failed",
@@ -427,3 +479,4 @@ def get_or_compute_analysis(session_id, file_paths, options):
         raise
     finally:
         report_db.release_analysis_lock(analysis_key, lock_owner)
+        _log("lock released")

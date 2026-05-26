@@ -6,13 +6,13 @@ INPUT_DIR = ROOT_DIR / "data"
 OUTPUT_DIR = ROOT_DIR / "output"
 DATASETS_DIR = OUTPUT_DIR / "datasets"
 UPLOAD_FORM_PATH = ROOT_DIR / "upload_form.html"
-SCHOOL_FILES_GLOB = "*_school_updated_call.csv"
+SCHOOL_FILES_GLOB = "*_school.csv"
 
-META_COLUMNS = ["call", "grade", "class", "student_type"]
+META_COLUMNS = ["DUT", "XCoord", "YCoord", "Bin"]
 N_META_COLUMNS = len(META_COLUMNS)
 
-SUBJECT_NAME_ROW, UNIT_ROW, LO_LIMIT_ROW, HI_LIMIT_ROW = 0, 1, 2, 3
-STUDENT_DATA_START_ROW = 6
+SUBJECT_NAME_ROW, UNITS_ROW, LOWER_LIMIT_ROW, UPPER_LIMIT_ROW = 0, 1, 2, 3
+DATA_START_ROW = 6
 
 COLS_PER_ROW = 5
 

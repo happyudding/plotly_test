@@ -130,7 +130,7 @@ def build_dataset(dataset_id, inputs, progress_cb=None):
         step_t0 = time.perf_counter()
         payload = build_payload(
             idx, first.subjects[idx], _idx_or(first.units, idx, ""),
-            _idx_or(first.lo_limits, idx), _idx_or(first.hi_limits, idx), traces,
+            _idx_or(first.lower_limits, idx), _idx_or(first.upper_limits, idx), traces,
         )
         payload_s += time.perf_counter() - step_t0
         step_t0 = time.perf_counter()
@@ -141,7 +141,7 @@ def build_dataset(dataset_id, inputs, progress_cb=None):
         step_t0 = time.perf_counter()
         svg = build_subject_svg(
             idx, first.subjects[idx], _idx_or(first.units, idx, ""),
-            _idx_or(first.lo_limits, idx), _idx_or(first.hi_limits, idx), traces, payload["layout"],
+            _idx_or(first.lower_limits, idx), _idx_or(first.upper_limits, idx), traces, payload["layout"],
         )
         svg_s += time.perf_counter() - step_t0
         step_t0 = time.perf_counter()

@@ -77,9 +77,9 @@ def _merge_cpk_subject(rows: list) -> list:
         cur = row.get("subject")
         if cur == prev:
             row["subject"] = ""
-            row["lo_limit"] = ""
-            row["hi_limit"] = ""
-            row["unit"] = ""
+            row["lower_limit"] = ""
+            row["upper_limit"] = ""
+            row["units"] = ""
         else:
             prev = cur
         merged.append(row)
@@ -87,7 +87,7 @@ def _merge_cpk_subject(rows: list) -> list:
 
 
 def _yield_sort_key(r: dict):
-    st = str(r.get("student_type", "")).strip()
+    st = str(r.get("bin", "")).strip()
     is_pass = 0 if st == "1" else 1
     try:
         avg = float(r.get("avg") or 0)
@@ -99,7 +99,7 @@ def _yield_sort_key(r: dict):
 def _build_issue_rows(fail_items: dict, sources: list, issue_comments: dict) -> list:
     rows = []
     for r in (fail_items or {}).get("rows", []) or []:
-        st = str(r.get("student_type", "")).strip()
+        st = str(r.get("bin", "")).strip()
         fail_subjects = r.get("fail_subjects") or []
         is_pass = st == "1"
         if is_pass or not fail_subjects:
@@ -113,7 +113,7 @@ def _build_issue_rows(fail_items: dict, sources: list, issue_comments: dict) -> 
         if not isinstance(saved, dict):
             saved = {}
         row = {
-            "student_type": st,
+            "bin": st,
             "subject": subject,
             "subject_id": subject_id,
             "avg": r.get("avg"),
@@ -307,11 +307,11 @@ def _sheet_summary(wb, dataset_id, meta, yield_rows, fail_items,
     sources  = meta.get("sources")  or []
     subjects = meta.get("subjects") or []
 
-    pass_row     = next((r for r in yield_rows if str(r.get("student_type",""))=="1"), {})
+    pass_row     = next((r for r in yield_rows if str(r.get("bin",""))=="1"), {})
     avg_val      = pass_row.get("avg")
     pass_yield   = f"{avg_val:.2f}%" if avg_val is not None else "-"
     non_pass     = [r for r in (fail_items.get("rows") or [])
-                    if str(r.get("student_type","")) != "1"]
+                    if str(r.get("bin","")) != "1"]
 
     ROW = 1
 
@@ -356,7 +356,7 @@ def _sheet_summary(wb, dataset_id, meta, yield_rows, fail_items,
     _section_row(ws, ROW, "Yield Summary", span=6); ROW += 1
 
     _c(ws, ROW, 1,
-       f"Overall Pass Yield (student_type 1):  {pass_yield}",
+       f"Overall Pass Yield (Bin 1):  {pass_yield}",
        font=Font(bold=True, size=12, color="1F4D8C"), align=_ALIGN_L, border=None)
     ws.merge_cells(f"A{ROW}:F{ROW}")
     ws.row_dimensions[ROW].height = 22; ROW += 1
@@ -371,7 +371,7 @@ def _sheet_summary(wb, dataset_id, meta, yield_rows, fail_items,
     _header_row(ws, ROW, ys_headers, ys_widths); ROW += 1
 
     for rank, r in enumerate(non_pass[:5], 1):
-        st           = str(r.get("student_type",""))
+        st           = str(r.get("bin",""))
         fail_subs    = r.get("fail_subjects") or []
         main_fail    = fail_subs[0].get("subject","N/A") if fail_subs else "N/A"
         avg_r        = r.get("avg")
@@ -406,7 +406,7 @@ def _sheet_yield(wb, yield_rows, sources, yield_comments):
     ws.sheet_view.showGridLines = False
     ws.freeze_panes = "A2"
 
-    headers = ["student_type", "count"]
+    headers = ["bin", "count"]
     widths  = [12, 8]
     for src in sources:
         headers.append(str(src))
@@ -419,17 +419,17 @@ def _sheet_yield(wb, yield_rows, sources, yield_comments):
     merged = []
     for row in yield_rows:
         row = dict(row)
-        key = str(row.get("student_type",""))
+        key = str(row.get("bin",""))
         row["comment"] = yield_comments.get(key, row.get("comment","") or "")
         merged.append(row)
     merged.sort(key=_yield_sort_key)
 
     for r_idx, row in enumerate(merged, 2):
-        is_pass = str(row.get("student_type","")) == "1"
+        is_pass = str(row.get("bin","")) == "1"
         bg = _FILL_PASS if is_pass else None
 
         col = 1
-        _c(ws, r_idx, col, row.get("student_type"), fill=bg, align=_ALIGN_C); col += 1
+        _c(ws, r_idx, col, row.get("bin"), fill=bg, align=_ALIGN_C); col += 1
         _c(ws, r_idx, col, row.get("count"),         fill=bg, align=_ALIGN_C); col += 1
         for src in sources:
             _c(ws, r_idx, col, row.get(f"portion_{src}"), fill=bg, align=_ALIGN_C, num_fmt="0.00")
@@ -447,7 +447,7 @@ def _sheet_cpk(wb, cpk_rows, cpk_comments):
     ws.sheet_view.showGridLines = False
     ws.freeze_panes = "A2"
 
-    headers = ["subject", "lo_limit", "hi_limit", "unit", "source",
+    headers = ["subject", "lower_limit", "upper_limit", "units", "source",
                "min", "median", "max", "average", "stdev",
                "cpl", "cpu", "cp", "cpk", "comment"]
     widths  = [28, 9, 9, 8, 14, 9, 9, 9, 9, 9, 9, 9, 9, 9, 40]
@@ -458,8 +458,8 @@ def _sheet_cpk(wb, cpk_rows, cpk_comments):
             _cpk_comment_key(r.get("subject"), r.get("source")), "")
     rows = _merge_cpk_subject(cpk_rows)
 
-    numeric_cols = {"lo_limit","hi_limit","min","median","max","average","stdev","cpl","cpu","cp","cpk"}
-    center_cols  = numeric_cols | {"unit","source"}
+    numeric_cols = {"lower_limit","upper_limit","min","median","max","average","stdev","cpl","cpu","cp","cpk"}
+    center_cols  = numeric_cols | {"units","source"}
 
     for r_idx, row in enumerate(rows, 2):
         is_total = row.get("source") == "total"
@@ -499,7 +499,7 @@ def _sheet_fail_data(wb, dataset_id, fail_items):
     ws = wb.create_sheet("fail_data")
     ws.sheet_view.showGridLines = False
 
-    headers = ["student_type", "count", "portion (%)", "Main Fail Subject"]
+    headers = ["bin", "count", "portion (%)", "Main Fail Subject"]
     widths  = [12, 8, 12, 28]
     for i in range(1, MAX_FAIL_SUBS + 1):
         headers.append(f"Fail Subject {i}")
@@ -508,7 +508,7 @@ def _sheet_fail_data(wb, dataset_id, fail_items):
     _header_row(ws, 1, headers, widths)
 
     for r_idx, row in enumerate((fail_items.get("rows") or []), 2):
-        st       = str(row.get("student_type",""))
+        st       = str(row.get("bin",""))
         is_pass  = st == "1"
         fail_sub = row.get("fail_subjects") or []
 
@@ -552,10 +552,10 @@ def _sheet_fail_values(wb, dataset_id: str):
     ws.sheet_view.showGridLines = False
     ws.freeze_panes = "A2"
 
-    headers = ["Source (Sheet)", "Call", "Grade", "Class", "Type",
-               "Subject", "Value", "Lo Limit", "Hi Limit", "Fail"]
-    ids     = ["source", "call", "grade", "class", "student_type",
-               "subject", "value", "lo_limit", "hi_limit", "fail"]
+    headers = ["Source (Sheet)", "DUT", "XCoord", "YCoord", "Bin",
+               "Subject", "Value", "Lower Limit", "Upper Limit", "Fail"]
+    ids     = ["source", "dut", "x_coord", "y_coord", "bin",
+               "subject", "value", "lower_limit", "upper_limit", "fail"]
     widths  = [22, 8, 8, 8, 8, 28, 12, 12, 12, 9]
 
     _header_row(ws, 1, headers, widths)
@@ -566,12 +566,12 @@ def _sheet_fail_values(wb, dataset_id: str):
         rows = []
 
     if not rows:
-        _c(ws, 2, 1, "데이터 없음 (non-pass student가 없거나 fail 기준 미설정)",
+        _c(ws, 2, 1, "데이터 없음 (non-pass DUT가 없거나 fail 기준 미설정)",
            font=Font(size=11, color="888888"), border=None)
         return
 
-    center_cols = {"call", "grade", "class", "student_type", "value",
-                   "lo_limit", "hi_limit", "fail"}
+    center_cols = {"dut", "x_coord", "y_coord", "bin", "value",
+                   "lower_limit", "upper_limit", "fail"}
 
     for r_idx, row in enumerate(rows, 2):
         is_lo  = row.get("fail") == "< lo"
@@ -601,7 +601,7 @@ def _sheet_issue_table(wb, dataset_id, fail_items, sources, issue_comments):
     ws.sheet_view.showGridLines = False
     ws.freeze_panes = "A2"
 
-    headers = ["student_type", "subject", "average"]
+    headers = ["bin", "subject", "average"]
     widths  = [12, 26, 10]
     for src in sources:
         headers.append(str(src))
@@ -617,7 +617,7 @@ def _sheet_issue_table(wb, dataset_id, fail_items, sources, issue_comments):
     dist_col = 4 + len(sources)  # 1-based column index of "Distribution"
 
     for r_idx, row in enumerate(rows, 2):
-        st      = str(row.get("student_type",""))
+        st      = str(row.get("bin",""))
         is_pass = st == "1"
 
         _c(ws, r_idx, 1, st,               align=_ALIGN_C)

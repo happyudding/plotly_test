@@ -338,7 +338,7 @@ function renderTable(rows) {
 
   tbody.querySelectorAll("tr[data-session]").forEach(tr => {
     tr.addEventListener("click", () => {
-      window.location.href = "/pe/report/view/" + tr.dataset.session;
+      window.open("/pe/report/view/" + tr.dataset.session, "_blank", "noopener");
     });
   });
 }

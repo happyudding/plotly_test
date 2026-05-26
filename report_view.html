@@ -3,595 +3,301 @@
 <head>
 <meta charset="utf-8">
 <title>Analysis Report</title>
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 <style>
 * { box-sizing: border-box; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #f0f2f5; margin: 0; padding: 20px;
-  color: #222; font-size: 13px;
+  background: #f0f2f5; margin: 0; padding: 0;
+  color: #222; min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
 }
-.page-header {
-  display: flex; align-items: center; gap: 14px; margin-bottom: 18px;
+.card {
+  background: #fff; border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.08);
+  padding: 36px 40px; min-width: 520px; max-width: 640px;
+}
+.header {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 22px;
 }
 .back-btn {
-  padding: 7px 14px; border-radius: 6px; border: 1px solid #d0d5dd;
-  background: #fff; cursor: pointer; font-size: 13px; color: #444;
+  padding: 6px 12px; border-radius: 6px; border: 1px solid #d0d5dd;
+  background: #fff; cursor: pointer; font-size: 12px; color: #666;
   text-decoration: none; transition: all .12s;
 }
 .back-btn:hover { background: #f0f6ff; border-color: #4a90e2; color: #4a90e2; }
-.page-title { font-size: 18px; font-weight: 700; color: #1a1a2e; }
-.meta-info { font-size: 12px; color: #888; margin-left: auto; }
-
-/* 빌드 진행률 바 */
-.progress-banner {
-  background: #fff; border-radius: 10px; padding: 14px 20px;
-  box-shadow: 0 1px 6px rgba(0,0,0,.07); margin-bottom: 12px;
-  display: none;
+.title { font-size: 18px; font-weight: 700; color: #1a1a2e; }
+.session-id {
+  font-family: monospace; font-size: 11px; color: #888;
+  margin-bottom: 18px; word-break: break-all;
 }
-.progress-banner.show { display: block; }
-.progress-banner.error { background: #fee2e2; }
-.progress-banner.done { background: #dcfce7; }
-.progress-row {
-  display: flex; align-items: center; gap: 12px; font-size: 12px;
+.meta {
+  font-size: 12px; color: #555; margin-bottom: 24px;
+  padding: 12px 14px; background: #f8f9fb; border-radius: 8px;
+  border: 1px solid #e8eaed;
 }
-.progress-label { font-weight: 600; color: #333; min-width: 140px; }
-.progress-bar {
-  flex: 1; height: 10px; background: #e5e7eb;
-  border-radius: 5px; overflow: hidden;
-}
-.progress-fill {
-  height: 100%; background: linear-gradient(90deg, #4a90e2, #3a7cc5);
-  transition: width .4s ease; width: 0%;
-}
-.progress-meta { font-family: monospace; color: #666; font-size: 11px; white-space: nowrap; }
-
-/* tab bar */
-.tab-bar {
-  display: flex; gap: 0; background: #fff;
-  border-radius: 10px 10px 0 0; overflow: hidden;
-  box-shadow: 0 1px 6px rgba(0,0,0,.07);
-  border-bottom: 2px solid #e8eaed;
-}
-.tab {
-  padding: 12px 22px; cursor: pointer; font-size: 13px; font-weight: 500;
-  color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px;
-  transition: all .12s; white-space: nowrap;
-}
-.tab:hover { color: #4a90e2; background: #f8f9fb; }
-.tab.active { color: #4a90e2; border-bottom-color: #4a90e2; font-weight: 600; }
-
-/* tab content */
-.tab-content {
-  background: #fff; border-radius: 0 0 10px 10px;
-  box-shadow: 0 1px 6px rgba(0,0,0,.07);
-  padding: 20px; min-height: 300px;
-}
-.tab-pane { display: none; }
-.tab-pane.active { display: block; }
-
-/* tables */
-.tbl-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-thead th {
-  background: #f8f9fb; padding: 9px 12px; text-align: left;
-  font-weight: 600; color: #555; border-bottom: 1px solid #e8eaed;
-  white-space: nowrap;
-}
-tbody td { padding: 8px 12px; border-bottom: 1px solid #f0f2f5; color: #333; }
-tbody tr:last-child td { border-bottom: none; }
-tbody tr:hover td { background: #f8f9fb; }
-.num { text-align: right; font-variant-numeric: tabular-nums; }
-.fail { color: #dc2626; font-weight: 600; }
-.warn { color: #d97706; }
-.good { color: #16a34a; }
-
-/* cpk coloring */
-.cpk-bad  { color: #dc2626; font-weight: 600; }
-.cpk-warn { color: #d97706; font-weight: 600; }
-.cpk-ok   { color: #16a34a; }
-
-/* yield tab */
-.yield-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px,1fr));
-  gap: 12px; margin-bottom: 20px;
-}
-.yield-card {
-  border: 1px solid #e8eaed; border-radius: 8px; padding: 14px;
-  text-align: center;
-}
-.yield-card .label { font-size: 11px; color: #888; margin-bottom: 4px; }
-.yield-card .value { font-size: 22px; font-weight: 700; }
-.yield-card.pass .value { color: #16a34a; }
-.yield-card.fail .value { color: #dc2626; }
-
-/* fail items */
-.fail-group { margin-bottom: 16px; }
-.fail-group-header {
-  background: #f8f9fb; padding: 8px 12px; border-radius: 6px;
-  font-weight: 600; margin-bottom: 6px; color: #444; font-size: 12px;
-}
-
-/* distribution */
-#plotDiv { width: 100%; height: 600px; }
-.thumb-strip {
-  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
-}
-.thumb-item { text-align: center; }
-.thumb-item img { width: 120px; height: 82px; border: 1px solid #e8eaed; border-radius: 4px; }
-.thumb-item .thumb-name { font-size: 10px; color: #888; margin-top: 2px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* loading / error */
-.loading-msg { text-align: center; padding: 60px; color: #aaa; }
-.error-msg { text-align: center; padding: 40px; color: #dc2626; font-size: 13px; }
-
-/* badge */
+.meta-row { display: flex; gap: 10px; margin-bottom: 4px; }
+.meta-row:last-child { margin-bottom: 0; }
+.meta-label { color: #888; min-width: 90px; font-weight: 500; }
+.meta-val { color: #333; }
 .badge {
-  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  display: inline-block; padding: 2px 10px; border-radius: 12px;
   font-size: 11px; font-weight: 600;
 }
 .badge-A { background: #dbeafe; color: #1d4ed8; }
 .badge-B { background: #dcfce7; color: #15803d; }
 .badge-C { background: #fef9c3; color: #854d0e; }
 .badge-D { background: #fce7f3; color: #9d174d; }
+
+.progress-section { margin-top: 20px; }
+.progress-label {
+  font-size: 13px; font-weight: 600; color: #333; margin-bottom: 10px;
+}
+.progress-bar {
+  height: 14px; background: #e5e7eb; border-radius: 7px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%; background: linear-gradient(90deg, #4a90e2, #3a7cc5);
+  transition: width .4s ease; width: 0%;
+}
+.progress-fill.pulsing {
+  background-image: linear-gradient(90deg, #4a90e2 0%, #6fb0ff 50%, #4a90e2 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.progress-meta {
+  font-family: monospace; font-size: 11px; color: #666;
+  margin-top: 6px; white-space: pre-wrap;
+}
+
+.done-section { display: none; text-align: center; padding: 8px 0; }
+.done-section.show { display: block; }
+.done-icon { font-size: 42px; color: #16a34a; margin-bottom: 6px; }
+.done-msg { font-size: 14px; color: #16a34a; font-weight: 600; }
+.done-sub { font-size: 12px; color: #666; margin-top: 4px; }
+
+.error-section { display: none; text-align: center; padding: 8px 0; }
+.error-section.show { display: block; }
+.error-icon { font-size: 42px; color: #dc2626; margin-bottom: 6px; }
+.error-msg { font-size: 14px; color: #dc2626; font-weight: 600; }
+.error-detail {
+  font-size: 12px; color: #666; margin-top: 8px;
+  padding: 10px; background: #fee2e2; border-radius: 6px;
+  font-family: monospace; word-break: break-all; text-align: left;
+}
+
+.open-btn {
+  display: inline-block; margin-top: 16px; padding: 10px 22px;
+  background: #4a90e2; color: #fff; border: none; border-radius: 6px;
+  font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;
+}
+.open-btn:hover { background: #3a7cc5; }
 </style>
 </head>
 <body>
 
-<div class="page-header">
-  <a class="back-btn" href="/pe/report/">← 목록으로</a>
-  <div class="page-title" id="pageTitle">Analysis Report</div>
-  <div class="meta-info" id="metaInfo"></div>
-</div>
+<div class="card">
+  <div class="header">
+    <a class="back-btn" href="/pe/report/">← 목록</a>
+    <div class="title">Analysis Report</div>
+  </div>
 
-<div class="progress-banner" id="progressBanner">
-  <div class="progress-row">
-    <div class="progress-label" id="progressLabel">빌드 대기 중...</div>
+  <div class="session-id" id="sessionIdDisplay"></div>
+
+  <div class="meta" id="metaBox" style="display:none;">
+    <div class="meta-row"><span class="meta-label">파일</span><span class="meta-val" id="metaFiles"></span></div>
+    <div class="meta-row"><span class="meta-label">Product Type</span><span class="meta-val" id="metaPt"></span></div>
+    <div class="meta-row"><span class="meta-label">생성일시</span><span class="meta-val" id="metaDate"></span></div>
+    <div class="meta-row"><span class="meta-label">Dataset ID</span><span class="meta-val" id="metaDsId"></span></div>
+  </div>
+
+  <div class="progress-section" id="progressSection">
+    <div class="progress-label" id="progressLabel">초기화 중...</div>
     <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
     <div class="progress-meta" id="progressMeta"></div>
   </div>
-</div>
 
-<div class="tab-bar" id="tabBar">
-  <div class="tab active" data-tab="summary">Summary</div>
-  <div class="tab" data-tab="yield">Yield</div>
-  <div class="tab" data-tab="cpk">CPK</div>
-  <div class="tab" data-tab="failitems">Fail Items</div>
-  <div class="tab" data-tab="issuetable">Issue Table</div>
-  <div class="tab" data-tab="distribution">Distribution</div>
-</div>
+  <div class="done-section" id="doneSection">
+    <div class="done-icon">✓</div>
+    <div class="done-msg">빌드 완료</div>
+    <div class="done-sub">잠시 후 Analysis Report로 이동합니다...</div>
+    <a class="open-btn" id="openBtn" href="#">지금 열기</a>
+  </div>
 
-<div class="tab-content">
-  <div class="tab-pane active" id="pane-summary">
-    <div class="loading-msg">데이터 로딩 중...</div>
-  </div>
-  <div class="tab-pane" id="pane-yield">
-    <div class="loading-msg">데이터 로딩 중...</div>
-  </div>
-  <div class="tab-pane" id="pane-cpk">
-    <div class="loading-msg">데이터 로딩 중...</div>
-  </div>
-  <div class="tab-pane" id="pane-failitems">
-    <div class="loading-msg">데이터 로딩 중...</div>
-  </div>
-  <div class="tab-pane" id="pane-issuetable">
-    <div class="loading-msg">데이터 로딩 중...</div>
-  </div>
-  <div class="tab-pane" id="pane-distribution">
-    <div class="loading-msg">데이터 로딩 중...</div>
+  <div class="error-section" id="errorSection">
+    <div class="error-icon">✕</div>
+    <div class="error-msg" id="errorTitle">빌드 실패</div>
+    <div class="error-detail" id="errorDetail"></div>
   </div>
 </div>
 
 <script>
-// ── session id from URL ────────────────────────────────────────────────────────
 const SESSION_ID = location.pathname.split("/").pop();
+document.getElementById("sessionIdDisplay").textContent = "session_id: " + SESSION_ID;
 
-// loaded data cache
-let _full = null;
-
-// ── tab switching ─────────────────────────────────────────────────────────────
-const tabLoaded = {};
-
-document.querySelectorAll(".tab").forEach(tab => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-    document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
-    tab.classList.add("active");
-    const key = tab.dataset.tab;
-    document.getElementById("pane-" + key).classList.add("active");
-    if (!tabLoaded[key]) loadTab(key);
-  });
-});
-
-// ── initial load + polling ────────────────────────────────────────────────────
 const STAGE_LABELS = {
   queued: "대기 중", save_inputs: "1/5 CSV 저장", load_csv: "2/5 CSV 파싱",
   table_json: "3/5 테이블 JSON", cdf_svg: "4/5 CDF/SVG 생성",
   write_page: "5/5 HTML 생성", done: "빌드 완료", error: "빌드 에러",
 };
 
-let _pollTimer = null;
-let _isComplete = false;
+let _datasetId = null;
+let _completed = false;
+let _analysisWaitStart = null;  // 빌드 완료 후 분석 대기 시작 시각
 
-async function init() {
-  await refresh();
-  if (!_isComplete) {
-    _pollTimer = setInterval(refresh, 2500);
-  }
-}
-
-async function refresh() {
+async function poll() {
   try {
     const res = await fetch(`/pe/report/session/${SESSION_ID}/full`, { cache: "no-store" });
-    if (!res.ok) throw new Error(await res.text());
-    _full = await res.json();
+    if (!res.ok) {
+      if (res.status === 404) {
+        showError("세션을 찾을 수 없음", "session_id가 잘못되었거나 DB에서 삭제됨");
+        return;
+      }
+      throw new Error(await res.text());
+    }
+    const data = await res.json();
+    const session = data.session || {};
+    _datasetId = session.dataset_id || null;
 
-    const session = _full.session || {};
-    document.getElementById("pageTitle").textContent = session.file_name || SESSION_ID;
-    const pt = session.product_type || "";
-    const ptBadge = ["A","B","C","D"].includes(pt)
-      ? `<span class="badge badge-${pt}">${pt}</span> ` : "";
-    const date = session.created_at
-      ? new Date(session.created_at * 1000).toLocaleString("ko-KR") : "";
-    document.getElementById("metaInfo").innerHTML =
-      `${ptBadge}${escHtml(session.process || "")} ${escHtml(session.product || "")} ${escHtml(session.revision || "")} &nbsp;|&nbsp; ${date}`;
+    // 메타 정보 업데이트
+    updateMeta(session);
 
-    // 빌드 진행 상태 확인
-    const buildDone = await updateProgress(session);
-
-    const hasSummary = (_full.summary || []).length > 0;
-    if (hasSummary) {
-      // 데이터가 들어오면 모든 캐시 초기화 후 다시 로드
-      Object.keys(tabLoaded).forEach(k => delete tabLoaded[k]);
-      const activeTab = document.querySelector(".tab.active").dataset.tab;
-      tabLoaded[activeTab] = true;
-      if (activeTab === "summary") renderSummary(_full.summary || []);
-      else loadTab(activeTab);
+    // 세션 실패 처리
+    if (session.status === "failed") {
+      showError("분석 실패", session.error_message || "원인 미상");
+      return;
     }
 
-    // 완료 조건: 세션이 done/reused + cumulative 빌드도 완료
-    if ((session.status === "done" || session.status === "reused") && buildDone) {
-      _isComplete = true;
-      if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    // dataset_id 없는 순수 report/analyze 세션
+    if (!_datasetId) {
+      if (session.status === "done" || session.status === "reused") {
+        finish();
+      } else {
+        const lbl = document.getElementById("progressLabel");
+        const meta = document.getElementById("progressMeta");
+        lbl.textContent = "분석 진행 중";
+        meta.textContent = `status: ${session.status || "?"}`;
+        document.getElementById("progressFill").style.width = "30%";
+      }
+      return;
+    }
+
+    // build_status 확인 (dataset_id가 있는 execute-debug 세션)
+    const buildOk = await checkBuild(_datasetId);
+    if (buildOk) {
+      if (session.status === "done" || session.status === "reused") {
+        finish();
+      } else {
+        // 빌드는 끝났지만 분석이 아직 진행 중 → 경과 시간 + status 표시
+        if (_analysisWaitStart === null) _analysisWaitStart = Date.now();
+        const elapsed = Math.round((Date.now() - _analysisWaitStart) / 1000);
+        const lbl = document.getElementById("progressLabel");
+        const meta = document.getElementById("progressMeta");
+        const st = session.status || "?";
+        let hint = "";
+        if (elapsed > 90) {
+          hint = "  ⚠ 평소보다 오래 걸리는 중";
+        } else if (elapsed > 45) {
+          hint = "  (잠시만 더 기다려주세요)";
+        }
+        lbl.textContent = `빌드 완료 — 분석 처리 중... (${elapsed}s 경과)${hint}`;
+        meta.textContent = `analysis status: ${st} · 보통 5~30초 소요`;
+        const pf = document.getElementById("progressFill");
+        pf.style.width = "95%";
+        pf.classList.add("pulsing");
+      }
     }
   } catch (e) {
-    document.getElementById("pane-summary").innerHTML =
-      `<div class="error-msg">로드 실패: ${escHtml(e.message)}</div>`;
+    console.warn("poll error:", e);
   }
 }
 
-async function updateProgress(session) {
-  const banner = document.getElementById("progressBanner");
-  const label = document.getElementById("progressLabel");
+async function checkBuild(dsId) {
   const fill = document.getElementById("progressFill");
+  const lbl = document.getElementById("progressLabel");
   const meta = document.getElementById("progressMeta");
-
-  // 세션 실패
-  if (session.status === "failed") {
-    banner.className = "progress-banner show error";
-    label.textContent = "실패: " + (session.error_message || "");
-    fill.style.width = "0%"; meta.textContent = "";
-    return false;
-  }
-
-  // dataset_id가 있으면 cumulative 빌드 상태도 폴링
-  const dsId = session.dataset_id;
-  if (!dsId) {
-    if (session.status === "done" || session.status === "reused") {
-      banner.classList.remove("show");
-      return true;
-    }
-    banner.className = "progress-banner show";
-    label.textContent = "분석 진행 중";
-    fill.style.width = "30%"; meta.textContent = session.status || "";
-    return false;
-  }
 
   try {
     const r = await fetch(`/api/${dsId}/build_status`, { cache: "no-store" });
     if (!r.ok) {
-      banner.className = "progress-banner show";
-      label.textContent = "빌드 시작 대기";
+      // 빌드가 아직 시작 안 됨
+      lbl.textContent = "빌드 시작 대기";
       fill.style.width = "5%"; meta.textContent = "";
       return false;
     }
     const s = await r.json();
-    const stage = STAGE_LABELS[s.stage] || s.stage;
-    const pct = s.total > 0
-      ? Math.round(s.current / s.total * 100)
-      : (s.stage === "done" ? 100 : 5);
 
     if (s.stage === "error") {
-      banner.className = "progress-banner show error";
-      label.textContent = "빌드 에러: " + (s.error || "");
-      fill.style.width = "0%"; meta.textContent = "";
+      showError("빌드 에러", s.error || "원인 미상");
       return false;
     }
 
     if (s.stage === "done") {
-      banner.className = "progress-banner show done";
-      label.textContent = "빌드 완료";
+      lbl.textContent = "빌드 완료";
       fill.style.width = "100%";
-      meta.textContent = `${s.current}/${s.total} · ${s.elapsed_s}s`;
-      // 1초 후 배너 자동 숨김
-      setTimeout(() => banner.classList.remove("show"), 1500);
+      meta.textContent = `${s.current}/${s.total} subjects · ${s.elapsed_s}s`;
       return true;
     }
 
-    banner.className = "progress-banner show";
-    label.textContent = stage;
+    const stage = STAGE_LABELS[s.stage] || s.stage;
+    const pct = s.total > 0 ? Math.round(s.current / s.total * 100) : 5;
+    lbl.textContent = stage;
     fill.style.width = pct + "%";
     meta.textContent = `${s.current||0}/${s.total||0} · ${s.elapsed_s||0}s`;
     return false;
-  } catch (_) {
+  } catch (e) {
     return false;
   }
 }
 
-function loadTab(key) {
-  if (!_full) return;
-  tabLoaded[key] = true;
-  const akey = (_full.session || {}).analysis_key;
-  switch (key) {
-    case "yield":       renderYield(_full.summary || []); break;
-    case "cpk":         renderCpk(_full.summary || []); break;
-    case "failitems":   loadFailItems(akey); break;
-    case "issuetable":  loadIssueTable(akey); break;
-    case "distribution": loadDistribution(akey); break;
+function updateMeta(session) {
+  if (!session) return;
+  const box = document.getElementById("metaBox");
+  if (!session.session_id) return;
+  box.style.display = "";
+  document.getElementById("metaFiles").textContent = session.file_name || "-";
+  const pt = session.product_type || "";
+  document.getElementById("metaPt").innerHTML = ["A","B","C","D"].includes(pt)
+    ? `<span class="badge badge-${pt}">${pt}</span>` : (pt || "-");
+  document.getElementById("metaDate").textContent = session.created_at
+    ? new Date(session.created_at * 1000).toLocaleString("ko-KR") : "-";
+  document.getElementById("metaDsId").textContent = session.dataset_id || "-";
+}
+
+function finish() {
+  if (_completed) return;
+  _completed = true;
+  document.getElementById("progressSection").style.display = "none";
+  document.getElementById("doneSection").classList.add("show");
+  if (_datasetId) {
+    const dashUrl = `/dash/${_datasetId}`;
+    document.getElementById("openBtn").href = dashUrl;
+    document.querySelector(".done-sub").textContent = "잠시 후 Analysis Report로 이동합니다...";
+    setTimeout(() => { location.href = dashUrl; }, 1200);
+  } else {
+    // dataset_id 없는 순수 분석 완료: 대시보드 없음, 현재 세션 결과만 표시
+    const akey = document.getElementById("metaDsId").textContent.trim();
+    document.querySelector(".done-sub").textContent = "분석이 완료되었습니다.";
+    document.getElementById("openBtn").style.display = "none";
   }
 }
 
-// ── Summary ───────────────────────────────────────────────────────────────────
-function renderSummary(rows) {
-  const overall = rows.filter(r => r.bin_number === null || r.bin_number == null);
-  if (!overall.length) {
-    setPane("summary", '<div class="error-msg">Summary 데이터가 없습니다.</div>');
-    return;
-  }
-  const html = `<div class="tbl-wrap"><table>
-    <thead><tr>
-      <th>Item</th><th class="num">Yield %</th><th class="num">Fail</th>
-      <th class="num">CPK</th><th class="num">Mean</th><th class="num">Stdev</th>
-      <th class="num">LSL</th><th class="num">USL</th><th>Unit</th>
-    </tr></thead>
-    <tbody>${overall.map(r => {
-      const cpkCls = r.cpk_val == null ? "" : r.cpk_val < 1.0 ? "cpk-bad" : r.cpk_val < 1.33 ? "cpk-warn" : "cpk-ok";
-      const yieldCls = r.yield_percent != null && r.yield_percent < 90 ? "fail" : "";
-      return `<tr>
-        <td>${escHtml(r.item_name)}</td>
-        <td class="num ${yieldCls}">${fmt(r.yield_percent, 2)}%</td>
-        <td class="num">${r.fail_count ?? "-"}</td>
-        <td class="num ${cpkCls}">${fmt(r.cpk_val, 3)}</td>
-        <td class="num">${fmt(r.mean_val, 4)}</td>
-        <td class="num">${fmt(r.stdev_val, 4)}</td>
-        <td class="num">${fmt(r.lsl, 4)}</td>
-        <td class="num">${fmt(r.usl, 4)}</td>
-        <td>${escHtml(r.unit || "")}</td>
-      </tr>`;
-    }).join("")}</tbody>
-  </table></div>`;
-  setPane("summary", html);
+function showError(title, detail) {
+  _completed = true;
+  document.getElementById("progressSection").style.display = "none";
+  document.getElementById("doneSection").classList.remove("show");
+  document.getElementById("errorSection").classList.add("show");
+  document.getElementById("errorTitle").textContent = title;
+  document.getElementById("errorDetail").textContent = detail || "";
 }
 
-// ── Yield ─────────────────────────────────────────────────────────────────────
-function renderYield(rows) {
-  // rows with item_name == "__bin_total__" are the per-bin totals
-  const binRows = rows.filter(r => r.item_name === "__bin_total__");
-  if (!binRows.length) {
-    // fall back to overall rows
-    const overall = rows.filter(r => r.bin_number === null || r.bin_number == null);
-    if (!overall.length) { setPane("yield", '<div class="error-msg">Yield 데이터가 없습니다.</div>'); return; }
-    const cards = overall.slice(0,8).map(r => yieldCard(r.item_name, r.yield_percent)).join("");
-    setPane("yield", `<div class="yield-grid">${cards}</div>`);
-    return;
-  }
-  const cards = binRows.map(r => yieldCard(`Bin ${r.bin_number}`, r.yield_percent)).join("");
-  const tbl = `<div class="tbl-wrap"><table>
-    <thead><tr><th>Bin</th><th class="num">Yield %</th><th class="num">Fail Count</th></tr></thead>
-    <tbody>${binRows.map(r => `<tr>
-      <td>Bin ${r.bin_number}</td>
-      <td class="num ${r.yield_percent < 90 ? 'fail' : 'good'}">${fmt(r.yield_percent, 2)}%</td>
-      <td class="num">${r.fail_count ?? "-"}</td>
-    </tr>`).join("")}</tbody>
-  </table></div>`;
-  setPane("yield", `<div class="yield-grid">${cards}</div>${tbl}`);
-}
-
-function yieldCard(label, pct) {
-  const cls = pct != null && pct < 90 ? "fail" : "pass";
-  return `<div class="yield-card ${cls}">
-    <div class="label">${escHtml(label)}</div>
-    <div class="value">${pct != null ? pct.toFixed(1) + "%" : "-"}</div>
-  </div>`;
-}
-
-// ── CPK ───────────────────────────────────────────────────────────────────────
-function renderCpk(rows) {
-  const items = rows
-    .filter(r => r.cpk_val != null && (r.bin_number === null || r.bin_number == null))
-    .sort((a, b) => (a.cpk_val ?? 99) - (b.cpk_val ?? 99));
-  if (!items.length) { setPane("cpk", '<div class="error-msg">CPK 데이터가 없습니다.</div>'); return; }
-  const html = `<div class="tbl-wrap"><table>
-    <thead><tr>
-      <th>Item</th><th class="num">CPK</th><th class="num">Mean</th>
-      <th class="num">Stdev</th><th class="num">LSL</th><th class="num">USL</th><th>Unit</th>
-    </tr></thead>
-    <tbody>${items.map(r => {
-      const cls = r.cpk_val < 1.0 ? "cpk-bad" : r.cpk_val < 1.33 ? "cpk-warn" : "cpk-ok";
-      return `<tr>
-        <td>${escHtml(r.item_name)}</td>
-        <td class="num ${cls}">${fmt(r.cpk_val, 3)}</td>
-        <td class="num">${fmt(r.mean_val, 4)}</td>
-        <td class="num">${fmt(r.stdev_val, 4)}</td>
-        <td class="num">${fmt(r.lsl, 4)}</td>
-        <td class="num">${fmt(r.usl, 4)}</td>
-        <td>${escHtml(r.unit || "")}</td>
-      </tr>`;
-    }).join("")}</tbody>
-  </table></div>`;
-  setPane("cpk", html);
-}
-
-// ── Fail Items ────────────────────────────────────────────────────────────────
-async function loadFailItems(akey) {
-  if (!akey) { setPane("failitems", '<div class="error-msg">analysis_key 없음</div>'); return; }
-  try {
-    const res = await fetch(`/pe/report/fail_items/${akey}`);
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
-    renderFailItems(data);
-  } catch (e) {
-    setPane("failitems", `<div class="error-msg">${escHtml(e.message)}</div>`);
-  }
-}
-
-function renderFailItems(data) {
-  const rows = (data.rows || data || []);
-  if (!rows.length) { setPane("failitems", '<div class="error-msg">Fail Items 데이터가 없습니다.</div>'); return; }
-  const thumbTpl = _full && _full.thumb_url_template;
-  const groups = rows.map(r => {
-    const subjects = (r.fail_subjects || r["fail_subjects"] || []);
-    const subRows = subjects.map(s => {
-      const sid = s.subject_id ?? s.subject_idx;
-      const thumb = (thumbTpl && sid != null)
-        ? `<img src="${thumbTpl.replace("{subject_id}", sid)}" style="width:80px;height:55px;vertical-align:middle;border-radius:3px;border:1px solid #ddd;margin-right:6px;">`
-        : "";
-      return `<tr>
-        <td>${thumb}${escHtml(s.subject || s.name || "")}</td>
-        <td class="num">${s.count ?? "-"}</td>
-        <td class="num">${fmt(s["portion (%)"] ?? s.portion, 1)}%</td>
-      </tr>`;
-    }).join("");
-    const binLabel = r.student_type != null ? `Bin / Type: ${r.student_type}` : "Overall";
-    return `<div class="fail-group">
-      <div class="fail-group-header">${escHtml(binLabel)} — 총 ${r.count ?? 0}명 (${fmt(r["portion (%)"] ?? r.portion, 1)}%)</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Subject</th><th class="num">Count</th><th class="num">Portion</th></tr></thead>
-        <tbody>${subRows}</tbody>
-      </table></div>
-    </div>`;
-  }).join("");
-  setPane("failitems", groups);
-}
-
-// ── Issue Table ───────────────────────────────────────────────────────────────
-async function loadIssueTable(akey) {
-  if (!akey) { setPane("issuetable", '<div class="error-msg">analysis_key 없음</div>'); return; }
-  try {
-    const res = await fetch(`/pe/report/issue_table/${akey}`);
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
-    renderIssueTable(Array.isArray(data) ? data : (data.rows || []));
-  } catch (e) {
-    setPane("issuetable", `<div class="error-msg">${escHtml(e.message)}</div>`);
-  }
-}
-
-function renderIssueTable(rows) {
-  if (!rows.length) { setPane("issuetable", '<div class="error-msg">Issue Table 데이터가 없습니다.</div>'); return; }
-  const cols = Object.keys(rows[0]);
-  const html = `<div class="tbl-wrap"><table>
-    <thead><tr>${cols.map(c => `<th>${escHtml(c)}</th>`).join("")}</tr></thead>
-    <tbody>${rows.map(r => `<tr>${cols.map(c => {
-      const v = r[c];
-      const cls = c === "fail" ? " class=\"fail\"" : "";
-      return `<td${cls}>${escHtml(v == null ? "" : String(v))}</td>`;
-    }).join("")}</tr>`).join("")}</tbody>
-  </table></div>`;
-  setPane("issuetable", html);
-}
-
-// ── Distribution ──────────────────────────────────────────────────────────────
-async function loadDistribution(akey) {
-  if (!akey) { setPane("distribution", '<div class="error-msg">analysis_key 없음</div>'); return; }
-  setPane("distribution", '<div class="loading-msg">Plotly 차트 로딩 중...</div>');
-  try {
-    const res = await fetch(`/pe/report/plot/${akey}`);
-    if (!res.ok) throw new Error(await res.text());
-    const payload = await res.json();
-
-    const container = document.createElement("div");
-    const plotDiv = document.createElement("div");
-    plotDiv.id = "plotDiv";
-    container.appendChild(plotDiv);
-
-    // thumbnail strip from fail items
-    const thumbTpl = _full && _full.thumb_url_template;
-    if (thumbTpl) {
-      const strip = document.createElement("div");
-      strip.className = "thumb-strip";
-      // get subject ids from fail items if possible
-      if (_full._failSubjectIds) {
-        _full._failSubjectIds.forEach(({ id, name }) => {
-          const item = document.createElement("div");
-          item.className = "thumb-item";
-          item.innerHTML = `<img src="${thumbTpl.replace("{subject_id}", id)}" loading="lazy"><div class="thumb-name">${escHtml(name)}</div>`;
-          strip.appendChild(item);
-        });
-      }
-      container.appendChild(strip);
-    }
-
-    document.getElementById("pane-distribution").innerHTML = "";
-    document.getElementById("pane-distribution").appendChild(container);
-
-    if (payload.data && payload.layout) {
-      Plotly.react("plotDiv", payload.data, payload.layout, { responsive: true });
-    } else if (payload.error) {
-      throw new Error(payload.error);
-    } else {
-      plotDiv.innerHTML = '<div class="error-msg">차트 데이터 형식 오류</div>';
-    }
-
-    // preload fail subject ids for thumbstrip
-    if (thumbTpl && !_full._failSubjectIds) {
-      try {
-        const fr = await fetch(`/pe/report/fail_items/${akey}`);
-        const fd = await fr.json();
-        const ids = [];
-        (fd.rows || fd || []).forEach(row => {
-          (row.fail_subjects || []).forEach(s => {
-            if (s.subject_id != null) ids.push({ id: s.subject_id, name: s.subject || "" });
-          });
-        });
-        _full._failSubjectIds = ids;
-        if (ids.length) {
-          const strip = container.querySelector(".thumb-strip") || (() => {
-            const s = document.createElement("div"); s.className = "thumb-strip";
-            container.appendChild(s); return s;
-          })();
-          strip.innerHTML = "";
-          ids.forEach(({ id, name }) => {
-            const item = document.createElement("div");
-            item.className = "thumb-item";
-            item.innerHTML = `<img src="${thumbTpl.replace("{subject_id}", id)}" loading="lazy"><div class="thumb-name">${escHtml(name)}</div>`;
-            strip.appendChild(item);
-          });
-        }
-      } catch (_) {}
-    }
-  } catch (e) {
-    setPane("distribution", `<div class="error-msg">${escHtml(e.message)}</div>`);
-  }
-}
-
-// ── utils ─────────────────────────────────────────────────────────────────────
-function setPane(key, html) {
-  document.getElementById("pane-" + key).innerHTML = html;
-}
-
-function fmt(v, decimals) {
-  if (v == null) return "-";
-  return Number(v).toFixed(decimals);
-}
-
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
-
-init();
+// 초기 + 2.5초 간격 폴링
+poll();
+const _timer = setInterval(() => {
+  if (_completed) { clearInterval(_timer); return; }
+  poll();
+}, 2500);
 </script>
 </body>
 </html>

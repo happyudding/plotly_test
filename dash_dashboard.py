@@ -6,9 +6,59 @@ from flask import abort, send_from_directory
 
 from config import DATASETS_DIR
 from table_builder import read_table_json, get_fail_values
+import report_db
 
 
 PAGE_SIZE = 25
+
+
+def _format_size(bytes_val):
+    try:
+        b = int(bytes_val or 0)
+    except (TypeError, ValueError):
+        return "-"
+    if b >= 1024 * 1024:
+        return f"{b / 1024 / 1024:.1f} MB"
+    if b >= 1024:
+        return f"{b / 1024:.1f} KB"
+    return f"{b} B"
+
+
+def _format_upload_date(ts):
+    if not ts:
+        return "-"
+    try:
+        import datetime
+        return datetime.datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError, OSError):
+        return "-"
+
+
+def _build_session_meta_inline(html, dataset_id):
+    """`/pe/report/` 검색결과 필드를 topbar 한 줄에 인라인 표시."""
+    try:
+        sess = report_db.get_session_by_dataset_id(dataset_id)
+    except Exception:
+        sess = None
+    if not sess:
+        return []
+
+    pt = (sess.get("product_type") or "").strip()
+    pt_badge_cls = "session-badge session-badge-" + (pt if pt in ("A", "B", "C", "D") else "default")
+
+    file_name = sess.get("file_name") or "-"
+    items = [
+        html.Span(file_name, className="meta-inline-file", title=file_name),
+        html.Span(pt or "-", className=pt_badge_cls),
+        html.Span(sess.get("process") or "-", className="meta-inline"),
+        html.Span(sess.get("product") or "-", className="meta-inline"),
+        html.Span(sess.get("revision") or "-", className="meta-inline"),
+        html.Span(_format_upload_date(sess.get("created_at")), className="meta-inline"),
+        html.Span(_format_size(sess.get("total_file_size")), className="meta-inline"),
+        html.Span(sess.get("session_id") or "-", className="meta-inline meta-inline-sess",
+                  title=sess.get("session_id") or ""),
+    ]
+    return items
 
 
 def _dash_imports():
@@ -21,20 +71,21 @@ def _dash_imports():
 
 
 TAB_STYLE = {
-    "padding": "8px 14px",
-    "fontSize": "13px",
-    "lineHeight": "1.2",
+    "padding": "4px 10px",
+    "fontSize": "11px",
+    "lineHeight": "1.1",
     "height": "auto",
     "minHeight": "0",
     "borderBottom": "1px solid #ddd",
+    "fontWeight": "700",
 }
 TAB_SELECTED_STYLE = {
     **TAB_STYLE,
     "borderTop": "2px solid #4a90e2",
-    "fontWeight": "600",
+    "fontWeight": "700",
     "color": "#1f4d8c",
 }
-TABS_PARENT_STYLE = {"height": "44px", "minHeight": "0"}
+TABS_PARENT_STYLE = {"height": "31px", "minHeight": "0"}
 
 
 def _columns(rows_or_columns):
@@ -75,7 +126,7 @@ def _table(dash_table, table_id, rows=None, page_size=PAGE_SIZE, columns=None, *
 
 
 def _yield_sort_key(r):
-    st = str(r.get("student_type", "")).strip()
+    st = str(r.get("bin", "")).strip()
     is_pass = 0 if st == "1" else 1
     try:
         avg = float(r.get("avg") or 0)
@@ -86,7 +137,7 @@ def _yield_sort_key(r):
 
 def _yield_columns(sources):
     cols = [
-        {"name": "student_type", "id": "student_type"},
+        {"name": "bin", "id": "bin"},
         {"name": "count", "id": "count", "type": "numeric"},
     ]
     for src in sources or []:
@@ -99,7 +150,7 @@ def _yield_columns(sources):
 
 def _yield_style(sources):
     narrow_widths = {
-        "student_type": "54px",
+        "bin": "54px",
         "count": "42px",
         "avg": "58px",
     }
@@ -148,7 +199,7 @@ def _cpk_style():
     # + stdev(52) + cpl(52) + cpu(52) + cp(52) + cpk(52)
     # + comment(200) = ~1088px
     metric_cols = ["stdev", "cp", "cpl", "cpu", "cpk"]
-    limit_cols  = ["lo_limit", "hi_limit"]
+    limit_cols  = ["lower_limit", "upper_limit"]
     stat_cols   = ["min", "median", "max"]
     return [
         {"if": {"column_id": col}, "width": "52px", "minWidth": "46px", "maxWidth": "72px", "textAlign": "right"}
@@ -161,7 +212,7 @@ def _cpk_style():
         for col in stat_cols
     ] + [
         {"if": {"column_id": "average"}, "width": "60px", "minWidth": "52px", "maxWidth": "80px", "textAlign": "right"},
-        {"if": {"column_id": "unit"},    "width": "46px", "minWidth": "40px", "maxWidth": "68px", "textAlign": "center"},
+        {"if": {"column_id": "units"},   "width": "46px", "minWidth": "40px", "maxWidth": "68px", "textAlign": "center"},
         {"if": {"column_id": "subject"}, "width": "150px", "minWidth": "120px", "maxWidth": "220px"},
         {"if": {"column_id": "source"},  "width": "82px",  "minWidth": "70px",  "maxWidth": "120px", "textAlign": "center"},
         {"if": {"column_id": "comment"}, "width": "200px", "minWidth": "140px", "maxWidth": "360px",
@@ -192,9 +243,9 @@ def _cpk_data_style():
 def _cpk_columns():
     spec = [
         ("subject", "subject"),
-        ("lo", "lo_limit"),
-        ("hi", "hi_limit"),
-        ("units", "unit"),
+        ("Lower Limit", "lower_limit"),
+        ("Upper Limit", "upper_limit"),
+        ("Units", "units"),
         ("source", "source"),
         ("min", "min"),
         ("median", "median"),
@@ -219,9 +270,9 @@ def _merge_cpk_subject(rows):
         cur = row.get("subject")
         if cur == prev:
             row["subject"] = ""
-            row["lo_limit"] = ""
-            row["hi_limit"] = ""
-            row["unit"] = ""
+            row["lower_limit"] = ""
+            row["upper_limit"] = ""
+            row["units"] = ""
         else:
             prev = cur
         merged.append(row)
@@ -237,84 +288,93 @@ def _load_small_tables(dataset_id):
     }
 
 
-def _read_yield_comments(dataset_id):
-    path = DATASETS_DIR / dataset_id / "tables" / "yield_comments.json"
+# ── Dashboard 편집 셀 저장소 (SQLite report_dashboard_comment) ────────────────
+# kind 별 의미:
+#   yield_comment         : { bin: comment_text }
+#   summary_yield_comment : { bin: comment_text }
+#   cpk_comment           : { "subject|source": comment_text }
+#   summary_feature       : 단일 dict → "_singleton" 키에 JSON 문자열로 저장
+#   summary_eval          : 단일 dict → "_singleton" 키에 JSON 문자열로 저장
+#   issue_comment         : { bin: dict } → 각 bin 값에 JSON 문자열
+_SINGLETON_KEY = "_singleton"
+
+
+def _legacy_json_path(dataset_id, name):
+    return DATASETS_DIR / dataset_id / "tables" / name
+
+
+def _read_legacy_json(path):
     if not path.exists():
         return {}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
+
+
+def _read_flat_comments(dataset_id, kind, legacy_name):
+    """value 가 plain text 인 kind (yield_comment / summary_yield_comment / cpk_comment)."""
+    data = report_db.get_dashboard_comments(dataset_id, kind)
+    if data:
+        return data
+    return _read_legacy_json(_legacy_json_path(dataset_id, legacy_name))
+
+
+def _read_singleton_dict(dataset_id, kind, legacy_name):
+    """value 전체가 단일 JSON dict 인 kind (summary_feature / summary_eval)."""
+    data = report_db.get_dashboard_comments(dataset_id, kind)
+    raw = data.get(_SINGLETON_KEY) if data else None
+    if raw:
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return _read_legacy_json(_legacy_json_path(dataset_id, legacy_name))
+
+
+def _write_singleton_dict(dataset_id, kind, data):
+    payload = {_SINGLETON_KEY: json.dumps(data or {}, ensure_ascii=False, separators=(",", ":"))}
+    report_db.replace_dashboard_comments(dataset_id, kind, payload)
+
+
+def _read_yield_comments(dataset_id):
+    return _read_flat_comments(dataset_id, "yield_comment", "yield_comments.json")
 
 
 def _write_yield_comments(dataset_id, comments):
-    path = DATASETS_DIR / dataset_id / "tables" / "yield_comments.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(comments, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    report_db.replace_dashboard_comments(dataset_id, "yield_comment", comments or {})
 
 
 def _read_summary_comments(dataset_id):
-    path = DATASETS_DIR / dataset_id / "tables" / "summary_yield_comments.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    return _read_flat_comments(dataset_id, "summary_yield_comment", "summary_yield_comments.json")
 
 
 def _write_summary_comments(dataset_id, comments):
-    path = DATASETS_DIR / dataset_id / "tables" / "summary_yield_comments.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(comments, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    report_db.replace_dashboard_comments(dataset_id, "summary_yield_comment", comments or {})
 
 
 def _read_summary_eval(dataset_id):
-    path = DATASETS_DIR / dataset_id / "tables" / "summary_eval.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    return _read_singleton_dict(dataset_id, "summary_eval", "summary_eval.json")
 
 
 def _write_summary_eval(dataset_id, data):
-    path = DATASETS_DIR / dataset_id / "tables" / "summary_eval.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    _write_singleton_dict(dataset_id, "summary_eval", data)
 
 
 def _read_summary_feature(dataset_id):
-    path = DATASETS_DIR / dataset_id / "tables" / "summary_feature.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    return _read_singleton_dict(dataset_id, "summary_feature", "summary_feature.json")
 
 
 def _write_summary_feature(dataset_id, data):
-    path = DATASETS_DIR / dataset_id / "tables" / "summary_feature.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    _write_singleton_dict(dataset_id, "summary_feature", data)
 
 
 def _read_cpk_comments(dataset_id):
-    path = DATASETS_DIR / dataset_id / "tables" / "cpk_comments.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    return _read_flat_comments(dataset_id, "cpk_comment", "cpk_comments.json")
 
 
 def _write_cpk_comments(dataset_id, comments):
-    path = DATASETS_DIR / dataset_id / "tables" / "cpk_comments.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(comments, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    report_db.replace_dashboard_comments(dataset_id, "cpk_comment", comments or {})
 
 
 def _cpk_comment_key(subject, source):
@@ -323,7 +383,7 @@ def _cpk_comment_key(subject, source):
 
 def _issue_columns(sources):
     cols = [
-        {"name": "student_type", "id": "student_type"},
+        {"name": "bin", "id": "bin"},
         {"name": "subject", "id": "subject"},
         {"name": "average", "id": "avg", "type": "numeric"},
     ]
@@ -339,7 +399,7 @@ def _issue_columns(sources):
 
 def _issue_style(sources):
     rules = [
-        {"if": {"column_id": "student_type"}, "width": "62px", "minWidth": "62px", "maxWidth": "62px", "textAlign": "center"},
+        {"if": {"column_id": "bin"}, "width": "62px", "minWidth": "62px", "maxWidth": "62px", "textAlign": "center"},
         {"if": {"column_id": "subject"}, "width": "180px", "minWidth": "150px", "maxWidth": "220px"},
         {"if": {"column_id": "avg"}, "width": "58px", "minWidth": "58px", "maxWidth": "58px", "textAlign": "center"},
     ]
@@ -380,26 +440,32 @@ def _issue_data_style():
 
 
 def _read_issue_comments(dataset_id):
-    path = DATASETS_DIR / dataset_id / "tables" / "issue_comments.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    data = report_db.get_dashboard_comments(dataset_id, "issue_comment")
+    if data:
+        result = {}
+        for st, raw in data.items():
+            try:
+                result[st] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if result:
+            return result
+    return _read_legacy_json(_legacy_json_path(dataset_id, "issue_comments.json"))
 
 
 def _write_issue_comments(dataset_id, comments):
-    path = DATASETS_DIR / dataset_id / "tables" / "issue_comments.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(comments, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    payload = {}
+    for st, entry in (comments or {}).items():
+        if entry:
+            payload[str(st)] = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+    report_db.replace_dashboard_comments(dataset_id, "issue_comment", payload)
 
 
 def _project_issue_rows(fail_items, sources, comments, dataset_id):
     rows = []
     pass_type = "1"
     for r in (fail_items or {}).get("rows", []) or []:
-        st = str(r.get("student_type", "")).strip()
+        st = str(r.get("bin", "")).strip()
         fail_subjects = r.get("fail_subjects") or []
         if st == pass_type:
             subject = "Pass"
@@ -416,7 +482,7 @@ def _project_issue_rows(fail_items, sources, comments, dataset_id):
         if not isinstance(saved, dict):
             saved = {}
         row = {
-            "student_type": st,
+            "bin": st,
             "subject": subject,
             "avg": r.get("avg"),
             "distribution": distribution,
@@ -444,7 +510,7 @@ def _fail_item_row(html, dataset_id, row):
             for item in subjects
         ], className="subject-strip")
     return html.Div([
-        html.Div(row.get("student_type", ""), className="fail-cell type"),
+        html.Div(row.get("bin", ""), className="fail-cell type"),
         html.Div(row.get("count", ""), className="fail-cell count"),
         html.Div(row.get("portion (%)", ""), className="fail-cell portion"),
         html.Div(row.get("Main Fail subject", ""), className="fail-cell main"),
@@ -517,7 +583,7 @@ def register_dash(app):
         server=app,
         url_base_pathname="/dash/",
         suppress_callback_exceptions=True,
-        title="Plotly Data Dashboard",
+        title="Report",
     )
 
     dash_app.layout = html.Div([
@@ -538,19 +604,15 @@ def register_dash(app):
         tables = _load_small_tables(dataset_id)
         if not (DATASETS_DIR / dataset_id).exists():
             return dataset_id, {}, html.Div(f"Dataset not found: {dataset_id}", className="error")
-        meta = tables["meta"]
+        meta_items = _build_session_meta_inline(html, dataset_id)
         return dataset_id, tables, html.Div([
             html.Div([
-                html.H1("Plotly Data Dashboard"),
-                html.Div(
-                    f"dataset: {dataset_id} | rows: {meta.get('row_count', 0)} | subjects: {len(meta.get('subjects', []))}",
-                    className="meta",
-                ),
-                html.A("Open distribution full page", href=f"/view/{dataset_id}", target="_blank", className="link"),
-                html.Button("Download Raw XLSX", id="download-xlsx-btn", n_clicks=0, className="download-btn"),
-                html.Span(id="download-status", className="download-status"),
-                html.Button("Download Report XLSX", id="download-report-btn", n_clicks=0, className="download-btn download-btn-report"),
-                html.Span(id="download-report-status", className="download-status"),
+                html.H1("Report"),
+                html.Div(meta_items, className="topbar-meta"),
+                html.Div([
+                    html.Button("Download", id="download-report-btn", n_clicks=0, className="download-btn"),
+                    html.Span(id="download-report-status", className="download-status"),
+                ], className="topbar-actions"),
             ], className="topbar"),
             dcc.Tabs(
                 id="tabs",
@@ -583,7 +645,7 @@ def register_dash(app):
             yield_rows = tables.get("yield") or []
             fail_items_rows = (tables.get("fail_items") or {}).get("rows", [])
 
-            pass_row = next((r for r in yield_rows if str(r.get("student_type", "")) == "1"), {})
+            pass_row = next((r for r in yield_rows if str(r.get("bin", "")) == "1"), {})
             pass_portion = pass_row.get("portion (%)")
             if isinstance(pass_portion, (int, float)):
                 pass_yield_str = f"{pass_portion:.2f}%"
@@ -591,7 +653,7 @@ def register_dash(app):
                 pass_yield_str = str(pass_portion)
             else:
                 pass_yield_str = "-"
-            non_pass = [r for r in fail_items_rows if str(r.get("student_type", "")) != "1"]
+            non_pass = [r for r in fail_items_rows if str(r.get("bin", "")) != "1"]
 
             # ── Feature Table ─────────────────────────────────────────────────
             saved_feat = _read_summary_feature(dataset_id)
@@ -608,7 +670,7 @@ def register_dash(app):
             smry_comments = _read_summary_comments(dataset_id)
             yield_summary_rows = []
             for i, r in enumerate(non_pass[:5], 1):
-                st = str(r.get("student_type", ""))
+                st = str(r.get("bin", ""))
                 fail_subjects = r.get("fail_subjects") or []
                 main_fail = (fail_subjects[0].get("subject", "N/A")
                              if fail_subjects else r.get("Main Fail subject", "N/A"))
@@ -668,7 +730,7 @@ def register_dash(app):
                     columns=[
                         {"name": "NO.",                              "id": "no"},
                         {"name": "Yield",                            "id": "yield"},
-                        {"name": "Major Fail student_type(description, %)", "id": "major_fail"},
+                        {"name": "Major Fail Bin (description, %)", "id": "major_fail"},
                         {"name": "Comment",                          "id": "comment", "editable": True},
                     ],
                     data=yield_summary_rows,
@@ -726,7 +788,7 @@ def register_dash(app):
             merged = []
             for row in rows:
                 row = dict(row)
-                key = str(row.get("student_type", ""))
+                key = str(row.get("bin", ""))
                 row["comment"] = comments.get(key, row.get("comment", "") or "")
                 merged.append(row)
             merged.sort(key=_yield_sort_key)
@@ -842,7 +904,7 @@ def register_dash(app):
             fail_items = tables.get("fail_items") or {"rows": []}
             rows = fail_items.get("rows", [])
 
-            # ── Fail Values: per-student per-subject fail records ──────────────
+            # ── Fail Values: per-DUT per-subject fail records ──────────────
             try:
                 fv_rows = get_fail_values(dataset_id)
             except Exception:
@@ -850,26 +912,26 @@ def register_dash(app):
 
             fv_columns = [
                 {"name": "Source (Sheet)", "id": "source"},
-                {"name": "Call",           "id": "call"},
-                {"name": "Grade",          "id": "grade"},
-                {"name": "Class",          "id": "class"},
-                {"name": "Type",           "id": "student_type"},
+                {"name": "DUT",            "id": "dut"},
+                {"name": "XCoord",         "id": "x_coord"},
+                {"name": "YCoord",         "id": "y_coord"},
+                {"name": "Bin",            "id": "bin"},
                 {"name": "Subject",        "id": "subject"},
-                {"name": "Value",          "id": "value",    "type": "numeric"},
-                {"name": "Lo Limit",       "id": "lo_limit", "type": "numeric"},
-                {"name": "Hi Limit",       "id": "hi_limit", "type": "numeric"},
+                {"name": "Value",          "id": "value",       "type": "numeric"},
+                {"name": "Lower Limit",    "id": "lower_limit", "type": "numeric"},
+                {"name": "Upper Limit",    "id": "upper_limit", "type": "numeric"},
                 {"name": "Fail",           "id": "fail"},
             ]
             fv_col_style = [
                 {"if": {"column_id": "source"},       "width": "140px", "minWidth": "110px", "maxWidth": "200px"},
-                {"if": {"column_id": "call"},         "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
-                {"if": {"column_id": "grade"},        "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
-                {"if": {"column_id": "class"},        "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
-                {"if": {"column_id": "student_type"}, "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
+                {"if": {"column_id": "dut"},          "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
+                {"if": {"column_id": "x_coord"},      "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
+                {"if": {"column_id": "y_coord"},      "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
+                {"if": {"column_id": "bin"},          "width": "60px",  "minWidth": "50px",  "maxWidth": "80px",  "textAlign": "center"},
                 {"if": {"column_id": "subject"},      "width": "220px", "minWidth": "160px", "maxWidth": "300px"},
                 {"if": {"column_id": "value"},        "width": "90px",  "minWidth": "70px",  "maxWidth": "120px", "textAlign": "right"},
-                {"if": {"column_id": "lo_limit"},     "width": "90px",  "minWidth": "70px",  "maxWidth": "120px", "textAlign": "right"},
-                {"if": {"column_id": "hi_limit"},     "width": "90px",  "minWidth": "70px",  "maxWidth": "120px", "textAlign": "right"},
+                {"if": {"column_id": "lower_limit"},  "width": "90px",  "minWidth": "70px",  "maxWidth": "120px", "textAlign": "right"},
+                {"if": {"column_id": "upper_limit"},  "width": "90px",  "minWidth": "70px",  "maxWidth": "120px", "textAlign": "right"},
                 {"if": {"column_id": "fail"},         "width": "68px",  "minWidth": "58px",  "maxWidth": "90px",  "textAlign": "center", "fontWeight": "600"},
             ]
             fv_data_style = [
@@ -893,11 +955,11 @@ def register_dash(app):
 
             return html.Div([
                 html.Div("Fail Item", className="section-title"),
-                html.Div("student_type != 1 rows use the same yield counts, with subject thumbnails sorted by portion.", className="table-note"),
+                html.Div("Bin != 1 rows use the same yield counts, with subject thumbnails sorted by portion.", className="table-note"),
                 html.Div(
                     html.Div([
                         html.Div([
-                            html.Div("student_type", className="fail-cell head type"),
+                            html.Div("Bin", className="fail-cell head type"),
                             html.Div("count", className="fail-cell head count"),
                             html.Div("portion (%)", className="fail-cell head portion"),
                             html.Div("Main Fail subject", className="fail-cell head main"),
@@ -911,7 +973,7 @@ def register_dash(app):
                 # ── Fail Values ────────────────────────────────────────────────
                 html.Div("Fail Values", className="section-title small", style={"marginTop": "32px"}),
                 html.Div(
-                    f"student_type ≠ 1 인 모든 학생의 개별 fail 기록 — "
+                    f"Bin ≠ 1 인 모든 DUT의 개별 fail 기록 — "
                     f"총 {len(fv_rows):,}건 (subject별, source별 분리). "
                     "첫 로드 시 계산 후 캐시됩니다.",
                     className="table-note",
@@ -953,7 +1015,7 @@ def register_dash(app):
             return html.Div([
                 html.Div("Yield", className="section-title"),
                 html.Div(
-                    "Most-failed subject per student_type (ties broken by count, then alphabetical). Issue Point and Comment fields are editable and auto-saved.",
+                    "Most-failed subject per Bin (ties broken by count, then alphabetical). Issue Point and Comment fields are editable and auto-saved.",
                     className="table-note",
                 ),
                 html.Div(
@@ -1088,7 +1150,7 @@ def register_dash(app):
             return ""
         payload = {}
         for row in data:
-            key = str(row.get("student_type", "")).strip()
+            key = str(row.get("bin", "")).strip()
             comment = (row.get("comment") or "").strip()
             if key and comment:
                 payload[key] = comment
@@ -1177,7 +1239,7 @@ def register_dash(app):
             return ""
         payload = {}
         for row in data:
-            key = str(row.get("student_type", "")).strip()
+            key = str(row.get("bin", "")).strip()
             if not key:
                 continue
             entry = {
@@ -1358,53 +1420,6 @@ def register_dash(app):
         """
         async function(n_clicks, dataset_id) {
           if (!n_clicks || !dataset_id) return '';
-          const filename = `${dataset_id}_raw.xlsx`;
-          const url = `/api/${dataset_id}/raw_xlsx`;
-          try {
-            const resp = await fetch(url, { cache: 'no-store' });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const blob = await resp.blob();
-            if (window.showSaveFilePicker) {
-              try {
-                const handle = await window.showSaveFilePicker({
-                  suggestedName: filename,
-                  types: [{
-                    description: 'Excel Workbook',
-                    accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
-                  }],
-                });
-                const writable = await handle.createWritable();
-                await writable.write(blob);
-                await writable.close();
-                return `saved: ${handle.name}`;
-              } catch (err) {
-                if (err && err.name === 'AbortError') return 'cancelled';
-                // fall through to anchor fallback
-              }
-            }
-            const objUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = objUrl;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(objUrl);
-            return `downloaded: ${filename}`;
-          } catch (err) {
-            return 'error: ' + (err && err.message ? err.message : err);
-          }
-        }
-        """,
-        Output("download-status", "children"),
-        Input("download-xlsx-btn", "n_clicks"),
-        State("dataset-id", "data"),
-    )
-
-    dash_app.clientside_callback(
-        """
-        async function(n_clicks, dataset_id) {
-          if (!n_clicks || !dataset_id) return '';
           const filename = `${dataset_id}_report.xlsx`;
           const url = `/api/${dataset_id}/report_xlsx`;
           try {
@@ -1456,16 +1471,28 @@ def register_dash(app):
     {%css%}
     <style>
       body { margin: 0; background: #fafafa; color: #222; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      .topbar { padding: 14px 18px; background: #fff; border-bottom: 1px solid #ddd; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+      .topbar { padding: 6px 12px; background: #fff; border-bottom: 1px solid #ddd; display: flex; gap: 10px; align-items: center; flex-wrap: nowrap; min-height: 34px; }
       .dash-root > .topbar { position: sticky; top: 0; z-index: 60; background: #fff; }
-      .topbar h1 { font-size: 18px; margin: 0; }
-      .meta, .table-note { font-size: 12px; color: #666; }
-      .link { font-size: 12px; color: #2369b3; text-decoration: none; }
-      .download-btn { font-size: 12px; padding: 5px 12px; border: 1px solid #2369b3; background: #f7fbff; color: #1f4d8c; border-radius: 4px; cursor: pointer; }
-      .download-btn:hover { background: #eaf3fc; }
-      .download-btn-report { border-color: #2d7d46; background: #f4fbf6; color: #1a4d2b; }
-      .download-btn-report:hover { background: #e6f5eb; }
-      .download-status { font-size: 11px; color: #555; min-height: 14px; }
+      .topbar h1 { font-size: 13px; margin: 0; font-weight: 700; color: #1a1a2e; white-space: nowrap; flex-shrink: 0; }
+      .topbar-meta { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; overflow: hidden; }
+      .topbar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+      .meta-inline { font-size: 11px; color: #444; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+      .meta-inline-file { font-size: 11px; color: #1a1a2e; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+      .meta-inline-sess { font-family: "Consolas", "Menlo", monospace; color: #888; font-size: 10px; max-width: 110px; }
+      .topbar-meta > * + * { position: relative; padding-left: 10px; }
+      .topbar-meta > * + *::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); height: 12px; width: 1px; background: #d8dde5; }
+      .table-note { font-size: 12px; color: #666; }
+      .link { font-size: 11px; color: #2369b3; text-decoration: none; white-space: nowrap; }
+      .link:hover { text-decoration: underline; }
+      .download-btn { font-size: 11px; padding: 3px 12px; border: 1px solid #2d7d46; background: #f4fbf6; color: #1a4d2b; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+      .download-btn:hover { background: #e6f5eb; }
+      .download-status { font-size: 10px; color: #555; min-height: 12px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .session-badge { display: inline-block; padding: 1px 8px; border-radius: 9px; font-size: 10px; font-weight: 700; line-height: 1.3; }
+      .session-badge-A { background: #dbeafe; color: #1d4ed8; }
+      .session-badge-B { background: #dcfce7; color: #15803d; }
+      .session-badge-C { background: #fef9c3; color: #854d0e; }
+      .session-badge-D { background: #fce7f3; color: #9d174d; }
+      .session-badge-default { background: #e5e7eb; color: #555; }
       .save-status { font-size: 11px; color: #2d6b2d; margin-top: 6px; min-height: 14px; }
       .cpk-search-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
       .cpk-search-input { width: 320px; font-size: 12px; padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px; outline: none; transition: border-color 0.15s ease, background 0.15s ease; }
@@ -1483,10 +1510,10 @@ def register_dash(app):
         60% { background-color: #fff5b8; }
         100% { background-color: transparent; }
       }
-      .main-tabs { position: sticky; top: 52px; z-index: 55; background: #fff; border-bottom: 1px solid #ddd; height: 44px; min-height: 0; }
-      .main-tabs .tab-parent, .main-tabs .tab-container { height: 44px !important; min-height: 0 !important; }
-      .main-tabs .tab { padding: 8px 14px !important; font-size: 13px !important; line-height: 1.2 !important; height: auto !important; min-height: 0 !important; }
-      .main-tabs .tab--selected { padding: 8px 14px !important; font-size: 13px !important; line-height: 1.2 !important; height: auto !important; min-height: 0 !important; }
+      .main-tabs { position: sticky; top: 34px; z-index: 55; background: #fff; border-bottom: 1px solid #ddd; height: 31px; min-height: 0; box-shadow: 0 2px 4px rgba(0,0,0,.05); }
+      .main-tabs .tab-parent, .main-tabs .tab-container { height: 31px !important; min-height: 0 !important; }
+      .main-tabs .tab { padding: 4px 10px !important; font-size: 11px !important; line-height: 1.1 !important; height: auto !important; min-height: 0 !important; font-weight: 700 !important; }
+      .main-tabs .tab--selected { padding: 4px 10px !important; font-size: 11px !important; line-height: 1.1 !important; height: auto !important; min-height: 0 !important; font-weight: 700 !important; }
       .content { padding: 16px; }
       .section-title { font-size: 16px; font-weight: 650; margin: 0 0 12px; }
       .section-title.small { margin-top: 18px; font-size: 14px; }
