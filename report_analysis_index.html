@@ -369,10 +369,12 @@ tbody td { padding: 10px 14px; color: #333; }
         <div class="sel-dropdown" id="productDropdown"></div>
       </div>
     </div>
-    <!-- LOTID text search -->
+    <!-- 자유 검색: 결과 표 안의 모든 컬럼에 대해 substring 매칭 -->
     <div class="filter-group">
-      <label class="filter-label">LOT ID</label>
-      <input type="text" class="filter-input" id="lotIdInput" placeholder="LOT ID 검색...">
+      <label class="filter-label">검색</label>
+      <input type="text" class="filter-input" id="lotIdInput"
+             placeholder="Product / LOT / Process / 파일명 등 모든 항목 검색..."
+             title="결과에 표시되는 모든 컬럼(Product Type, Product, Revision, LOT ID, Process, 파일명 등)에 대해 substring 매칭됩니다.">
     </div>
     <!-- search button -->
     <div class="filter-actions">
@@ -458,11 +460,13 @@ tbody td { padding: 10px 14px; color: #333; }
     <p class="modal-section-title">분석 종류</p>
     <div class="analysis-types">
       <div class="analysis-types-row" id="analysisTypes">
-        <label class="cb-label"><input type="checkbox" value="Yield" checked> Yield</label>
+        <label class="cb-label"><input type="checkbox" value="Summary" checked> Summary</label>
+        <label class="cb-label" title="Yield 는 항상 생성됩니다"><input type="checkbox" value="Yield" checked disabled> Yield</label>
         <label class="cb-label"><input type="checkbox" value="CPK" checked> CPK</label>
         <label class="cb-label"><input type="checkbox" value="Fail_Item" checked> Fail_Item</label>
+        <label class="cb-label"><input type="checkbox" value="Issue_Table" checked> Issue_Table</label>
         <label class="cb-label"><input type="checkbox" value="Distribution" checked> Distribution</label>
-        <label class="cb-label"><input type="checkbox" value="Histogram" checked> Histogram</label>
+        <label class="cb-label"><input type="checkbox" value="Histogram"> Histogram</label>
       </div>
     </div>
 
@@ -719,8 +723,15 @@ const dlSelCount = document.getElementById("dlSelCount");
 
 function openOptionsModal() {
   renderDualList();
-  // 분석 종류 기본: 전부 체크
-  document.querySelectorAll("#analysisTypes input[type=checkbox]").forEach(cb => cb.checked = true);
+  // 분석 종류 기본값:
+  //   - Yield: 항상 checked + disabled (필수)
+  //   - Histogram: default off
+  //   - 그 외(Summary/CPK/Fail_Item/Issue_Table/Distribution): default on
+  document.querySelectorAll("#analysisTypes input[type=checkbox]").forEach(cb => {
+    if (cb.value === "Yield") { cb.checked = true; cb.disabled = true; }
+    else if (cb.value === "Histogram") { cb.checked = false; cb.disabled = false; }
+    else { cb.checked = true; cb.disabled = false; }
+  });
   document.getElementById("optPw").value = "";
   optionsModal.classList.add("open");
 }
@@ -1007,6 +1018,11 @@ document.getElementById("searchBtn").addEventListener("click", loadHistory);
 document.getElementById("lotIdInput").addEventListener("keydown", e => {
   if (e.key === "Enter") loadHistory();
 });
+// 자유 검색은 client-side 에서 즉시 필터링 → 서버 재호출 없이 결과를 좁힌다.
+document.getElementById("lotIdInput").addEventListener("input", () => {
+  _currentPage = 0;
+  renderPage();
+});
 
 // ── history API ───────────────────────────────────────────────────────────────
 async function loadHistory() {
@@ -1014,8 +1030,9 @@ async function loadHistory() {
   if (state.productType) params.set("product_type", state.productType);
   if (state.process)     params.set("process", state.process);
   if (state.product)     params.set("product", state.product);
-  const lotId = document.getElementById("lotIdInput").value.trim();
-  if (lotId) params.set("lot_id", lotId);
+  // lot_id 파라미터는 더 이상 서버로 보내지 않음. 검색 입력은 클라이언트에서
+  // 결과의 모든 컬럼(product_type/product/revision/lot_id/process/file_name 등)에
+  // 대해 substring 매칭으로 필터링한다.
 
   try {
     const res = await fetch("/pe/report/api/history?" + params);
@@ -1029,6 +1046,23 @@ async function loadHistory() {
   }
 }
 
+// 결과 row 들에 자유 검색어를 적용. 검색어가 없으면 입력 그대로 반환.
+const _SEARCH_FIELDS = [
+  "product_type", "product", "revision", "lot_id",
+  "process", "file_name", "session_id", "dataset_id", "status",
+];
+function _applyFreeTextSearch(rows) {
+  const q = (document.getElementById("lotIdInput").value || "").trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter(r => {
+    for (const f of _SEARCH_FIELDS) {
+      const v = r[f];
+      if (v != null && String(v).toLowerCase().includes(q)) return true;
+    }
+    return false;
+  });
+}
+
 function updateDropdownOptions(rows) {
   const unique = key => [...new Set(rows.map(r => r[key]).filter(Boolean))].sort();
   processSelect.setOptions(unique("process"));
@@ -1038,10 +1072,12 @@ function updateDropdownOptions(rows) {
 // ── render ────────────────────────────────────────────────────────────────────
 function renderPage() {
   const tbody = document.getElementById("resultsTbody");
-  const total = _lastRows.length;
+  const visible = _applyFreeTextSearch(_lastRows);
+  const total = visible.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (_currentPage >= totalPages) _currentPage = 0;
   const start = _currentPage * PAGE_SIZE;
-  const pageRows = _lastRows.slice(start, start + PAGE_SIZE);
+  const pageRows = visible.slice(start, start + PAGE_SIZE);
 
   document.getElementById("resultsCount").textContent =
     `총 ${total}건 (${_currentPage + 1} / ${totalPages} 페이지)`;

@@ -498,6 +498,26 @@ def execute():
         is_debug=0,
     )
 
+    # 사용자가 선택한 analyses 목록을 dataset_id 단위로 저장.
+    # Dash 가 탭별 렌더링 시 이 목록을 읽어 비활성화된 탭은
+    # "Not Generated at the user's request." 배너로 대체한다.
+    # 호환: options 에 analyses 가 없으면(legacy 호출) 저장 생략 → 모든 탭 활성으로 간주.
+    analyses_opt = options.get("analyses") if isinstance(options, dict) else None
+    if isinstance(analyses_opt, (list, tuple)) and analyses_opt:
+        # Yield 는 클라이언트에서 disabled 라 빠질 일이 거의 없지만 방어적으로 보강.
+        analyses_set = {str(a) for a in analyses_opt if a}
+        analyses_set.add("Yield")
+        try:
+            report_db.replace_dashboard_comments(
+                dataset_id, "enabled_analyses",
+                {"_singleton": json.dumps(
+                    {"analyses": sorted(analyses_set)},
+                    ensure_ascii=False, separators=(",", ":"),
+                )},
+            )
+        except Exception:
+            pass
+
     def _set_status(s):
         with _build_lock:
             _build_status[s["dataset_id"]] = s

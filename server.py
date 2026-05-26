@@ -20,6 +20,42 @@ DEFAULT_DATASET = "current"
 _build_status = {}
 _build_lock = threading.Lock()
 
+# ── XLSX async build jobs ─────────────────────────────────────────────────────
+# job_id → {dataset_id, percent, stage, done, data: bytes|None, error, created_at}
+_XLSX_JOBS: dict[str, dict] = {}
+_XLSX_LOCK = threading.Lock()
+_XLSX_JOB_TTL_SEC = 600  # 다운로드 안 받아도 10분 후 GC
+
+
+def _xlsx_gc_expired():
+    """오래된 job 결과를 메모리에서 제거."""
+    now = time.time()
+    with _XLSX_LOCK:
+        expired = [jid for jid, j in _XLSX_JOBS.items()
+                   if now - j.get("created_at", now) > _XLSX_JOB_TTL_SEC]
+        for jid in expired:
+            _XLSX_JOBS.pop(jid, None)
+
+
+def _xlsx_set_progress(job_id: str, percent: int, stage: str):
+    with _XLSX_LOCK:
+        j = _XLSX_JOBS.get(job_id)
+        if j is not None:
+            j["percent"] = int(percent)
+            j["stage"] = stage
+
+
+def _xlsx_set_done(job_id: str, *, data: bytes | None = None, error: str | None = None):
+    with _XLSX_LOCK:
+        j = _XLSX_JOBS.get(job_id)
+        if j is not None:
+            j["done"] = True
+            j["data"] = data
+            j["error"] = error
+            if error is None:
+                j["percent"] = 100
+                j["stage"] = "완료"
+
 
 def _safe(id):
     return bool(id) and len(id) <= 80 and all(c.isalnum() or c in "-_" for c in id)
@@ -194,18 +230,108 @@ def raw_xlsx(id):
 
 @bp.get("/api/<id>/report_xlsx")
 def report_xlsx(id):
+    """동기 빌드 — 기존 사용처(예: 외부 스크립트) 호환용. UI 는 async 경로 사용."""
     if not _safe(id):
         abort(400)
     if not (DATASETS_DIR / id / "tables" / "meta.json").exists():
         abort(404)
+    include_raw = request.args.get("include_raw") in ("1", "true", "yes")
     try:
-        data = build_report_xlsx(id)
+        data = build_report_xlsx(id, include_raw=include_raw)
     except Exception as exc:
         abort(500, f"Report generation failed: {exc}")
+    suffix = "_with_raw" if include_raw else ""
     resp = send_file(
         BytesIO(data),
         as_attachment=True,
-        download_name=f"{id}_report.xlsx",
+        download_name=f"{id}_report{suffix}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+# ── XLSX async build: start / progress / download ────────────────────────────
+
+@bp.post("/api/<id>/report_xlsx_start")
+def report_xlsx_start(id):
+    """백그라운드 빌드 시작. body: {include_raw: bool}. 응답: {job_id}."""
+    if not _safe(id):
+        abort(400)
+    if not (DATASETS_DIR / id / "tables" / "meta.json").exists():
+        abort(404)
+
+    _xlsx_gc_expired()
+
+    body = request.get_json(silent=True) or {}
+    include_raw = bool(body.get("include_raw"))
+
+    job_id = secrets.token_hex(8)
+    with _XLSX_LOCK:
+        _XLSX_JOBS[job_id] = {
+            "dataset_id": id,
+            "percent": 0,
+            "stage": "대기 중",
+            "done": False,
+            "data": None,
+            "error": None,
+            "created_at": time.time(),
+            "include_raw": include_raw,
+        }
+
+    def _run():
+        try:
+            def _cb(pct, stage):
+                _xlsx_set_progress(job_id, pct, stage)
+            data = build_report_xlsx(id, include_raw=include_raw, progress_cb=_cb)
+            _xlsx_set_done(job_id, data=data)
+        except Exception as exc:
+            _xlsx_set_done(job_id, error=str(exc))
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"job_id": job_id, "include_raw": include_raw})
+
+
+@bp.get("/api/<id>/report_xlsx_progress/<job_id>")
+def report_xlsx_progress(id, job_id):
+    if not _safe(id) or not _safe(job_id):
+        abort(400)
+    with _XLSX_LOCK:
+        j = _XLSX_JOBS.get(job_id)
+        if j is None or j.get("dataset_id") != id:
+            abort(404)
+        return jsonify({
+            "percent": j.get("percent", 0),
+            "stage": j.get("stage", ""),
+            "done": bool(j.get("done")),
+            "error": j.get("error"),
+            "include_raw": bool(j.get("include_raw")),
+        })
+
+
+@bp.get("/api/<id>/report_xlsx_download/<job_id>")
+def report_xlsx_download(id, job_id):
+    if not _safe(id) or not _safe(job_id):
+        abort(400)
+    with _XLSX_LOCK:
+        j = _XLSX_JOBS.get(job_id)
+        if j is None or j.get("dataset_id") != id:
+            abort(404)
+        if not j.get("done"):
+            abort(409, "build not finished")
+        if j.get("error"):
+            abort(500, j["error"])
+        data = j.get("data")
+        include_raw = bool(j.get("include_raw"))
+        # 다운로드 직후 결과를 메모리에서 제거.
+        _XLSX_JOBS.pop(job_id, None)
+    if not data:
+        abort(500, "no data")
+    suffix = "_with_raw" if include_raw else ""
+    resp = send_file(
+        BytesIO(data),
+        as_attachment=True,
+        download_name=f"{id}_report{suffix}.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     resp.headers["Cache-Control"] = "no-cache"

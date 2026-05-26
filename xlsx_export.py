@@ -495,48 +495,13 @@ def _sheet_cpk(wb, cpk_rows, cpk_comments):
 MAX_FAIL_SUBS = 5   # how many fail subjects to show per row
 
 
-def _sheet_fail_data(wb, dataset_id, fail_items):
-    ws = wb.create_sheet("fail_data")
-    ws.sheet_view.showGridLines = False
+def _sheet_fail_data(wb, dataset_id, fail_items=None):
+    """Fail Item 은 그림 수가 많아 SVG→PNG 변환 비용이 크므로 sheet 에는 링크만 둔다.
+    클릭하면 세션의 Fail Item 탭으로 이동해서 모든 fail subject 썸네일을 확인 가능.
 
-    headers = ["bin", "count", "portion (%)", "Main Fail Subject"]
-    widths  = [12, 8, 12, 28]
-    for i in range(1, MAX_FAIL_SUBS + 1):
-        headers.append(f"Fail Subject {i}")
-        widths.append(THUMB_COL_W)
-
-    _header_row(ws, 1, headers, widths)
-
-    for r_idx, row in enumerate((fail_items.get("rows") or []), 2):
-        st       = str(row.get("bin",""))
-        is_pass  = st == "1"
-        fail_sub = row.get("fail_subjects") or []
-
-        _c(ws, r_idx, 1, st,                   align=_ALIGN_C)
-        _c(ws, r_idx, 2, row.get("count"),      align=_ALIGN_C)
-        _c(ws, r_idx, 3, row.get("portion (%)"), align=_ALIGN_C, num_fmt="0.00")
-        _c(ws, r_idx, 4,
-           row.get("Main Fail subject", "Pass" if is_pass else "N/A"),
-           align=_ALIGN_L)
-
-        if is_pass or not fail_sub:
-            _c(ws, r_idx, 5, "Pass" if is_pass else "N/A", align=_ALIGN_C)
-            ws.row_dimensions[r_idx].height = 20
-            continue
-
-        ws.row_dimensions[r_idx].height = THUMB_ROW_H
-
-        for j, subj in enumerate(fail_sub[:MAX_FAIL_SUBS], 1):
-            col_idx  = 4 + j
-            sid      = subj.get("subject_id")
-            label    = f"{subj.get('subject','')[:24]}\n{subj.get('count','')}ea"
-            _c(ws, r_idx, col_idx, label, font=_FONT_SMALL, align=_ALIGN_LT)
-
-            if sid is not None:
-                png = _get_thumb_png(dataset_id, sid)
-                if png:
-                    _add_image(ws, png, f"{get_column_letter(col_idx)}{r_idx}",
-                               THUMB_W_PX, THUMB_H_PX)
+    fail_items 인자는 시그니처 호환을 위해 받지만 더 이상 사용하지 않는다.
+    """
+    _sheet_link_only(wb, "fail_data", dataset_id, "Fail Item")
 
 
 # ── Sheet 5: fail_values ────────────────────────────────────────────────────────
@@ -645,159 +610,159 @@ def _sheet_issue_table(wb, dataset_id, fail_items, sources, issue_comments):
 
         ws.row_dimensions[r_idx].height = THUMB_ROW_H
         sid = row.get("subject_id")
+        # 산포 그림 1장은 무조건 노출되도록 보강.
+        # 1) 정상 변환 시 PNG 임베드
+        # 2) 변환 실패 시 셀에 thumbnail 직접 URL 하이퍼링크 + 안내 텍스트
         if sid is not None:
             png = _get_thumb_png(dataset_id, sid)
             if png:
                 _add_image(ws, png, f"{get_column_letter(dist_col)}{r_idx}",
                            THUMB_W_PX, THUMB_H_PX)
-
-
-# ── Sheet 6: distribution ───────────────────────────────────────────────────────
-
-_GRID_COLS   = 5    # thumbnails per row in the combined PNG
-_GRID_TW     = 100  # thumbnail width  (px) inside combined PNG
-_GRID_TH     = 69   # thumbnail height (px) inside combined PNG
-_GRID_LABEL  = 14   # label strip height (px) per thumbnail
-
-
-def _build_combined_png(dataset_id: str, subjects: list) -> bytes | None:
-    """
-    Compose a grid image of all subject thumbnails.
-    Requires: pillow  (pip install pillow)
-
-    Kaleido is used only when subjects <= KALEIDO_LIMIT to avoid long waits.
-    For large datasets without cairosvg, returns None (link-only fallback).
-    """
-    try:
-        from PIL import Image as PILImage, ImageDraw
-    except ImportError:
-        return None
-
-    n = len(subjects)
-    if n == 0:
-        return None
-
-    # Kaleido renders ~0.5-2s per image; allow it only for small datasets.
-    # cairosvg users are not affected (fast regardless of count).
-    KALEIDO_LIMIT = 150
-    use_kaleido = (n <= KALEIDO_LIMIT)
-
-    rows_count = (n + _GRID_COLS - 1) // _GRID_COLS
-    cell_h     = _GRID_TH + _GRID_LABEL
-    grid_w     = _GRID_COLS * _GRID_TW
-    grid_h     = rows_count * cell_h
-
-    grid = PILImage.new("RGB", (grid_w, grid_h), (255, 255, 255))
-    draw = ImageDraw.Draw(grid)
-
-    any_thumb = False
-    for i, subj in enumerate(subjects):
-        sid  = subj.get("subject_id", i)
-        col  = i % _GRID_COLS
-        row  = i // _GRID_COLS
-        x    = col * _GRID_TW
-        y    = row * cell_h
-
-        # label
-        name = str(subj.get("subject",""))[:22]
-        draw.text((x + 2, y + 1), name, fill=(80, 80, 80))
-
-        # thumbnail
-        png = _get_thumb_png(dataset_id, sid, w=_GRID_TW, h=_GRID_TH,
-                              allow_kaleido=use_kaleido)
-        if png:
-            try:
-                thumb = PILImage.open(BytesIO(png)).convert("RGB")
-                thumb = thumb.resize((_GRID_TW, _GRID_TH), PILImage.LANCZOS)
-                grid.paste(thumb, (x, y + _GRID_LABEL))
-                any_thumb = True
-            except Exception:
-                draw.rectangle([x, y + _GRID_LABEL, x + _GRID_TW - 1, y + cell_h - 1],
-                               outline=(200, 200, 200))
+            else:
+                fallback_url = f"{SERVER_BASE_URL}/api/{dataset_id}/thumb/{sid}"
+                cell = _c(
+                    ws, r_idx, dist_col,
+                    f"산포 보기 (subject {sid})",
+                    align=_ALIGN_C, border=_BORDER,
+                )
+                cell.hyperlink = fallback_url
+                cell.font = Font(size=10, color="2369B3", underline="single", bold=True)
         else:
-            draw.rectangle([x, y + _GRID_LABEL, x + _GRID_TW - 1, y + cell_h - 1],
-                           fill=(240, 240, 240), outline=(200, 200, 200))
-
-    if not any_thumb:
-        return None
-
-    buf = BytesIO()
-    grid.save(buf, format="PNG", optimize=True)
-    buf.seek(0)
-    return buf.getvalue()
+            # subject_id 자체가 없는 경우 (예: 단일 fail subject 없음) — 세션 페이지 링크.
+            cell = _c(
+                ws, r_idx, dist_col,
+                "세션에서 산포 보기",
+                align=_ALIGN_C, border=_BORDER,
+            )
+            cell.hyperlink = f"{SERVER_BASE_URL}/dash/{dataset_id}"
+            cell.font = Font(size=10, color="2369B3", underline="single")
 
 
-def _sheet_distribution(wb, dataset_id, subjects):
-    ws = wb.create_sheet("distribution")
+# ── Sheet 6 / 7: distribution & histogram (link-only) ──────────────────────────
+#
+# 그래프 자체는 워크북에 박지 않고 세션 페이지(`/dash/<dataset_id>`) 로 연결.
+# 그 페이지에서 Summary~Histogram 까지의 모든 탭에 접근할 수 있다.
+
+def _sheet_link_only(wb, sheet_name: str, dataset_id: str, tab_label: str):
+    ws = wb.create_sheet(sheet_name)
     ws.sheet_view.showGridLines = False
 
-    view_url = f"{SERVER_BASE_URL}/view/{dataset_id}"
-    n_sub    = len(subjects)
+    dash_url = f"{SERVER_BASE_URL}/dash/{dataset_id}"
 
-    ROW = 1
+    _c(ws, 1, 1, f"{tab_label} — {dataset_id}",
+       font=_FONT_TITLE, border=None)
+    ws.merge_cells("A1:F1")
+    ws.row_dimensions[1].height = 26
 
-    # Web link
-    lnk = _c(ws, ROW, 1,
-              "🌐  산포 분포 페이지 웹으로 열기 (서버 실행 중일 때 클릭)",
-              font=_FONT_LINK, align=_ALIGN_L, border=None)
-    lnk.hyperlink = view_url
-    ws.merge_cells(f"A{ROW}:J{ROW}")
-    ws.row_dimensions[ROW].height = 26; ROW += 1
+    lnk = _c(ws, 3, 1,
+             f"🌐  세션 페이지 열기 (전체 탭: Summary → Histogram)",
+             font=_FONT_LINK, align=_ALIGN_L, border=None)
+    lnk.hyperlink = dash_url
+    ws.merge_cells("A3:F3")
+    ws.row_dimensions[3].height = 24
 
-    # Info
-    _c(ws, ROW, 1,
-       f"아래 PNG: {n_sub}개 subject 썸네일 전체 그리드 | "
-       "※ 150개 초과 데이터셋은 cairosvg 필요 (Windows: GTK 런타임 + pip install cairosvg)",
+    _c(ws, 5, 1, dash_url,
        font=Font(size=10, color="666666"), align=_ALIGN_L, border=None)
-    ws.merge_cells(f"A{ROW}:J{ROW}")
-    ws.row_dimensions[ROW].height = 16; ROW += 1
+    ws.merge_cells("A5:F5")
+    ws.row_dimensions[5].height = 16
 
-    _blank_row(ws, ROW); ROW += 1
+    _c(ws, 7, 1,
+       f"이 시트에는 {tab_label} 그래프를 직접 포함하지 않습니다. "
+       "위 링크를 클릭하면 서버에서 동일 세션의 모든 탭(Summary, Yield, CPK, "
+       "Fail Item, Issue Table, Distribution, Histogram)이 열립니다.",
+       font=Font(size=10, color="888888"), align=_ALIGN_LT, border=None)
+    ws.merge_cells("A7:F7")
+    ws.row_dimensions[7].height = 48
 
-    # Combined PNG
-    combined = _build_combined_png(dataset_id, subjects)
-    if combined:
-        try:
-            img        = XLImage(BytesIO(combined))
-            rows_count = (n_sub + _GRID_COLS - 1) // _GRID_COLS
-            img.width  = _GRID_COLS * _GRID_TW
-            img.height = rows_count * (_GRID_TH + _GRID_LABEL)
-            ws.add_image(img, f"A{ROW}")
-        except Exception as e:
-            _c(ws, ROW, 1, f"PNG 삽입 실패: {e}",
-               font=Font(size=10, color="AA0000"), border=None)
-    else:
-        KALEIDO_LIMIT = 150
-        if n_sub > KALEIDO_LIMIT:
-            msg = (
-                f"썸네일 그리드 PNG 미생성 — subject {n_sub}개 > {KALEIDO_LIMIT}개 한도\n"
-                "Windows에서 대규모 그리드를 생성하려면 GTK 런타임 설치 후 pip install cairosvg\n"
-                "위 링크로 웹에서 전체 산포를 확인할 수 있습니다."
-            )
-        else:
-            msg = (
-                "썸네일 그리드 PNG 미생성 — pillow 설치 확인: pip install pillow\n"
-                "위 링크로 웹에서 산포를 확인하세요."
-            )
-        _c(ws, ROW, 1, msg, font=Font(size=11, color="888888"), align=_ALIGN_LT, border=None)
-        ws.merge_cells(f"A{ROW}:J{ROW}")
-        ws.row_dimensions[ROW].height = 52
+    ws.column_dimensions["A"].width = 80
 
-    ws.column_dimensions["A"].width = 20
+
+def _sheet_distribution(wb, dataset_id):
+    _sheet_link_only(wb, "distribution", dataset_id, "Distribution")
+
+
+def _sheet_histogram(wb, dataset_id):
+    _sheet_link_only(wb, "histogram", dataset_id, "Histogram")
+
+
+# ── RAW data sheets (옵션) ─────────────────────────────────────────────────────
+
+def _append_raw_sheets(wb, dataset_id: str, progress_cb=None):
+    """build_raw_xlsx 와 동일한 데이터를 같은 workbook 에 raw_<source> 시트로 추가."""
+    from data_loader import load_table
+    from table_builder import _subject_columns, _fmt_type
+    import pandas as pd
+
+    input_dir = DATASETS_DIR / dataset_id / "input"
+    if not input_dir.exists():
+        return
+
+    csv_paths = sorted(input_dir.glob("*.csv"))
+    if not csv_paths:
+        return
+
+    used = set(wb.sheetnames)
+    total = len(csv_paths)
+    for idx, p in enumerate(csv_paths, 1):
+        source_name = p.stem
+        table = load_table(p)
+        meta = table.meta.reset_index(drop=True).copy()
+        scores = table.scores.reset_index(drop=True).copy()
+        scores.columns = _subject_columns(table)
+        frame = pd.concat([meta, scores], axis=1)
+        frame["Bin"] = frame["Bin"].map(_fmt_type)
+
+        raw_name = f"raw_{source_name}"[:31] or f"raw_{idx}"
+        base = raw_name
+        i = 1
+        while raw_name in used:
+            suffix = f"_{i}"
+            raw_name = (base[: 31 - len(suffix)] + suffix)
+            i += 1
+        used.add(raw_name)
+
+        ws = wb.create_sheet(raw_name)
+        ws.append([str(c) for c in frame.columns])
+        for row_vals in frame.itertuples(index=False, name=None):
+            ws.append([
+                (None if (isinstance(v, float) and pd.isna(v)) else v)
+                for v in row_vals
+            ])
+
+        if progress_cb:
+            try:
+                progress_cb(idx, total, source_name)
+            except Exception:
+                pass
 
 
 # ── Public entry point ──────────────────────────────────────────────────────────
 
-def build_report_xlsx(dataset_id: str) -> bytes:
-    """Build and return the 7-sheet report XLSX as bytes."""
+def build_report_xlsx(dataset_id: str, *, include_raw: bool = False,
+                       progress_cb=None) -> bytes:
+    """Report XLSX 생성.
+
+    Args:
+      include_raw: True 면 원본 CSV 들을 raw_<source> 시트로 추가.
+      progress_cb: callable(percent:int, stage:str) — 진행률 알림용.
+    """
+    def _emit(pct, stage):
+        if progress_cb is None:
+            return
+        try:
+            progress_cb(max(0, min(100, int(pct))), stage)
+        except Exception:
+            pass
+
+    _emit(2, "테이블 로딩")
     meta     = read_table_json(dataset_id, "meta")       or {}
     yield_r  = read_table_json(dataset_id, "yield")      or []
     cpk_r    = read_table_json(dataset_id, "cpk")        or []
     fail_i   = read_table_json(dataset_id, "fail_items") or {"rows": []}
 
     sources  = meta.get("sources")  or []
-    subjects = meta.get("subjects") or []
 
+    _emit(6, "주석 로딩")
     ycomm  = _read_yield_comments(dataset_id)
     ccomm  = _read_cpk_comments(dataset_id)
     icomm  = _read_issue_comments(dataset_id)
@@ -807,15 +772,42 @@ def build_report_xlsx(dataset_id: str) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)  # remove the default blank sheet
 
+    _emit(10, "Summary 시트 작성 중")
     _sheet_summary(wb, dataset_id, meta, yield_r, fail_i, scomm, edata)
-    _sheet_yield(wb, yield_r, sources, ycomm)
-    _sheet_cpk(wb, cpk_r, ccomm)
-    _sheet_fail_data(wb, dataset_id, fail_i)
-    _sheet_fail_values(wb, dataset_id)          # ← new
-    _sheet_issue_table(wb, dataset_id, fail_i, sources, icomm)
-    _sheet_distribution(wb, dataset_id, subjects)
 
+    _emit(20, "Yield 시트 작성 중")
+    _sheet_yield(wb, yield_r, sources, ycomm)
+
+    _emit(30, "CPK 시트 작성 중")
+    _sheet_cpk(wb, cpk_r, ccomm)
+
+    _emit(40, "Fail Item 시트 작성 중 (SVG 썸네일 변환)")
+    _sheet_fail_data(wb, dataset_id, fail_i)
+
+    _emit(55, "Fail Values 시트 작성 중")
+    _sheet_fail_values(wb, dataset_id)
+
+    _emit(70, "Issue Table 시트 작성 중 (SVG 썸네일 변환)")
+    _sheet_issue_table(wb, dataset_id, fail_i, sources, icomm)
+
+    _emit(80, "Distribution 시트 (링크)")
+    _sheet_distribution(wb, dataset_id)
+
+    _emit(82, "Histogram 시트 (링크)")
+    _sheet_histogram(wb, dataset_id)
+
+    if include_raw:
+        _emit(85, "RAW 데이터 시트 추가 중")
+        def _raw_cb(idx, total, name):
+            base = 85
+            span = 10  # 85 → 95
+            pct = base + (idx / max(1, total)) * span
+            _emit(pct, f"RAW 시트 {idx}/{total}: {name}")
+        _append_raw_sheets(wb, dataset_id, progress_cb=_raw_cb)
+
+    _emit(96, "파일 저장 중")
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
+    _emit(100, "완료")
     return buf.getvalue()

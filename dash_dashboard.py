@@ -364,6 +364,58 @@ TABLE_KIND_ISSUE       = "issue_data_full"
 TABLE_KIND_SUMMARY_YIELD = "summary_yield_data_full"
 TABLE_KIND_SUMMARY_EVAL  = "summary_eval_data_full"
 
+# execute 시 선택된 분석 종류 (Summary/Yield/CPK/Fail_Item/Issue_Table/Distribution/Histogram).
+# 비어 있으면 legacy/back-compat 으로 모두 활성화 처리.
+TABLE_KIND_ANALYSES = "enabled_analyses"
+
+# 탭 이름 → analyses 옵션 라벨
+TAB_TO_ANALYSIS = {
+    "summary":      "Summary",
+    "yield":        "Yield",
+    "cpk":          "CPK",
+    "fail":         "Fail_Item",
+    "issues":       "Issue_Table",
+    "distribution": "Distribution",
+    "histogram":    "Histogram",
+}
+
+NOT_GENERATED_TEXT = "- Not Generated at the user's request. -"
+
+
+def _read_enabled_analyses(dataset_id):
+    """execute 시 저장한 enabled analyses set. None 이면 legacy → 전부 활성."""
+    raw = report_db.get_dashboard_comments(dataset_id, TABLE_KIND_ANALYSES)
+    if not raw:
+        return None
+    val = raw.get(_SINGLETON_KEY)
+    if not val:
+        return None
+    try:
+        parsed = json.loads(val)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    analyses = parsed.get("analyses") if isinstance(parsed, dict) else None
+    if not isinstance(analyses, list):
+        return None
+    return {str(x) for x in analyses}
+
+
+def _is_tab_disabled(tab, enabled_set):
+    """Yield 는 항상 활성. enabled_set 이 None 이면 legacy → 전부 활성."""
+    if enabled_set is None:
+        return False
+    name = TAB_TO_ANALYSIS.get(tab)
+    if name is None or name == "Yield":
+        return False
+    return name not in enabled_set
+
+
+def _not_generated_banner(html):
+    return html.Div(
+        NOT_GENERATED_TEXT,
+        className="not-generated-banner",
+    )
+
 
 def _read_yield_comments(dataset_id):
     return _read_flat_comments(dataset_id, "yield_comment", "yield_comments.json")
@@ -670,7 +722,71 @@ def register_dash(app):
     )
     def render_tab(tab, dataset_id, tables):
         tables = tables or _load_small_tables(dataset_id)
+        # execute 시 선택된 analyses 외의 탭은 데이터/iframe 로딩을 모두 스킵하고
+        # "Not Generated" 배너 + 빈 테이블 구조만 표시한다 (재방문 시 로드 시간 효율화).
+        enabled = _read_enabled_analyses(dataset_id)
+        disabled = _is_tab_disabled(tab, enabled)
+
+        _hdr_min = {"fontWeight": 600, "background": "#f6f7f9", "fontSize": 11,
+                    "padding": "4px 8px", "textAlign": "center"}
+        _cell_min = {
+            "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+            "fontSize": 12, "padding": "6px 10px",
+        }
+
         if tab == "summary":
+            if disabled:
+                return html.Div([
+                    _not_generated_banner(html),
+                    html.Div("Feature", className="section-title"),
+                    dash_table.DataTable(
+                        id="summary-feature-table",
+                        columns=[
+                            {"name": "subject",       "id": "subject"},
+                            {"name": "Customer Type", "id": "customer_type"},
+                            {"name": "GD",            "id": "gd"},
+                            {"name": "Process",       "id": "process"},
+                            {"name": "Line",          "id": "line"},
+                            {"name": "version",       "id": "version"},
+                        ],
+                        data=[], editable=False,
+                        style_table={"overflowX": "auto", "marginBottom": "24px"},
+                        style_cell={**_cell_min, "textAlign": "center"},
+                        style_header=_hdr_min,
+                    ),
+                    html.Div(id="summary-feature-save-status", className="save-status"),
+                    html.Div("Yield", className="section-title small"),
+                    dash_table.DataTable(
+                        id="summary-yield-table",
+                        columns=[
+                            {"name": "LOTID",   "id": "lotid"},
+                            {"name": "Yield",   "id": "yield"},
+                            {"name": "Rank",    "id": "mfy_rank"},
+                            {"name": "Subject", "id": "mfy_subject"},
+                            {"name": "Yield %", "id": "mfy_pct"},
+                            {"name": "Comment", "id": "comment"},
+                        ],
+                        data=[], editable=False,
+                        style_table={"overflowX": "auto"},
+                        style_cell={**_cell_min},
+                        style_header=_hdr_min,
+                    ),
+                    html.Div(id="summary-yield-save-status", className="save-status"),
+                    html.Div("Evaluation Summary", className="section-title small"),
+                    dash_table.DataTable(
+                        id="summary-eval-table",
+                        columns=[
+                            {"name": "Category",                "id": "category"},
+                            {"name": "Condition * Judge Limit", "id": "condition_limit"},
+                            {"name": "Result",                  "id": "result"},
+                        ],
+                        data=[], editable=False,
+                        style_table={"overflowX": "auto", "maxWidth": "900px"},
+                        style_cell={**_cell_min},
+                        style_header=_hdr_min,
+                    ),
+                    html.Div(id="summary-eval-save-status", className="save-status"),
+                ], className="summary-tab-content")
             meta = tables.get("meta") or {}
             yield_rows = tables.get("yield") or []
             fail_items_rows = (tables.get("fail_items") or {}).get("rows", [])
@@ -913,6 +1029,24 @@ def register_dash(app):
                 html.Div(id="yield-save-status", className="save-status"),
             ])
         if tab == "cpk":
+            if disabled:
+                return html.Div([
+                    _not_generated_banner(html),
+                    html.Div("CPK", className="section-title"),
+                    html.Div(
+                        dash_table.DataTable(
+                            id="cpk-table",
+                            columns=_cpk_columns(),
+                            data=[], editable=False,
+                            style_table={"overflowX": "auto", "minWidth": "100%"},
+                            style_cell={**_cell_min, "textAlign": "left"},
+                            style_cell_conditional=_cpk_style(),
+                            style_header={"fontWeight": 600, "background": "#f6f7f9"},
+                        ),
+                        className="cpk-table-wrap",
+                    ),
+                    html.Div(id="cpk-save-status", className="save-status"),
+                ])
             saved_rows = _read_table_rows(dataset_id, TABLE_KIND_CPK)
             if saved_rows is not None:
                 rows = saved_rows
@@ -970,6 +1104,46 @@ def register_dash(app):
                 ),
             ])
         if tab == "fail":
+            if disabled:
+                # 빈 fail_items 헤더만 + 빈 Fail Values 테이블 (get_fail_values 호출 스킵 → 재방문 시 시간 절약).
+                fv_columns_empty = [
+                    {"name": "Source (Sheet)", "id": "source"},
+                    {"name": "DUT",            "id": "dut"},
+                    {"name": "XCoord",         "id": "x_coord"},
+                    {"name": "YCoord",         "id": "y_coord"},
+                    {"name": "Bin",            "id": "bin"},
+                    {"name": "Subject",        "id": "subject"},
+                    {"name": "Value",          "id": "value"},
+                    {"name": "Lower Limit",    "id": "lower_limit"},
+                    {"name": "Upper Limit",    "id": "upper_limit"},
+                    {"name": "Fail",           "id": "fail"},
+                ]
+                return html.Div([
+                    _not_generated_banner(html),
+                    html.Div("Fail Item", className="section-title"),
+                    html.Div(
+                        html.Div([
+                            html.Div([
+                                html.Div("Bin", className="fail-cell head type"),
+                                html.Div("count", className="fail-cell head count"),
+                                html.Div("portion (%)", className="fail-cell head portion"),
+                                html.Div("Main Fail subject", className="fail-cell head main"),
+                                html.Div("Fail Subjects", className="fail-cell head subjects"),
+                            ], className="fail-row header"),
+                        ], className="fail-table"),
+                        className="fail-table-scroll",
+                    ),
+                    html.Div("Fail Values", className="section-title small", style={"marginTop": "32px"}),
+                    dash_table.DataTable(
+                        id="fail-values-table",
+                        columns=fv_columns_empty,
+                        data=[], editable=False,
+                        style_table={"overflowX": "auto", "minWidth": "100%"},
+                        style_cell={**_cell_min, "textAlign": "left"},
+                        style_header={"fontWeight": 600, "background": "#f6f7f9", "fontSize": 11},
+                    ),
+                    html.Div(id="fail-values-save-status", className="save-status"),
+                ])
             fail_items = tables.get("fail_items") or {"rows": []}
             rows = fail_items.get("rows", [])
 
@@ -1078,6 +1252,28 @@ def register_dash(app):
                 html.Div(id="fail-values-save-status", className="save-status"),
             ])
         if tab == "issues":
+            if disabled:
+                sources_empty = (tables.get("meta") or {}).get("sources") or []
+                return html.Div([
+                    _not_generated_banner(html),
+                    html.Div("Yield", className="section-title"),
+                    html.Div(
+                        html.Div(className="issue-top-scroll-inner"),
+                        id="issue-top-scroll",
+                        className="issue-top-scroll",
+                    ),
+                    dash_table.DataTable(
+                        id="issue-table",
+                        columns=_issue_columns(sources_empty),
+                        data=[], editable=False,
+                        style_table={"overflowX": "auto", "minWidth": "100%"},
+                        style_cell={**_cell_min, "textAlign": "left",
+                                    "minWidth": "70px", "maxWidth": "360px"},
+                        style_cell_conditional=_issue_style(sources_empty),
+                        style_header={"fontWeight": 600, "background": "#f6f7f9"},
+                    ),
+                    html.Div(id="issue-save-status", className="save-status"),
+                ], className="issue-table-wrap")
             fail_items = tables.get("fail_items") or {"rows": []}
             sources = (tables.get("meta") or {}).get("sources") or []
             saved_issue = _read_table_rows(dataset_id, TABLE_KIND_ISSUE)
@@ -1154,8 +1350,18 @@ def register_dash(app):
                 ], open=True, className="low-cpk-details"),
             ], className="issue-table-wrap")
         if tab == "histogram":
+            if disabled:
+                # iframe 로딩 자체를 스킵해 재방문 시 페이지 로드 시간을 줄인다.
+                return html.Div([
+                    _not_generated_banner(html),
+                ], className="distribution-tab")
             return html.Div([
                 html.Iframe(src=f"/view_histogram/{dataset_id}", className="distribution-frame"),
+            ], className="distribution-tab")
+        # tab == "distribution" (default)
+        if disabled:
+            return html.Div([
+                _not_generated_banner(html),
             ], className="distribution-tab")
         return html.Div([
             html.Iframe(src=f"/view/{dataset_id}", className="distribution-frame"),
@@ -1471,45 +1677,17 @@ def register_dash(app):
         State("cpk-table", "page_size"),
     )
 
+    # 다운로드 버튼 → 모달 띄우기 (RAW 포함 여부 선택 → 진행률 표시 → 다운로드).
+    # 실제 빌드/진행률/다운로드 흐름은 index_string 의 vanilla JS 에서 처리.
     dash_app.clientside_callback(
         """
-        async function(n_clicks, dataset_id) {
+        function(n_clicks, dataset_id) {
           if (!n_clicks || !dataset_id) return '';
-          const filename = `${dataset_id}_report.xlsx`;
-          const url = `/api/${dataset_id}/report_xlsx`;
-          try {
-            const resp = await fetch(url, { cache: 'no-store' });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const blob = await resp.blob();
-            if (window.showSaveFilePicker) {
-              try {
-                const handle = await window.showSaveFilePicker({
-                  suggestedName: filename,
-                  types: [{
-                    description: 'Excel Workbook',
-                    accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
-                  }],
-                });
-                const writable = await handle.createWritable();
-                await writable.write(blob);
-                await writable.close();
-                return `saved: ${handle.name}`;
-              } catch (err) {
-                if (err && err.name === 'AbortError') return 'cancelled';
-              }
-            }
-            const objUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = objUrl;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(objUrl);
-            return `downloaded: ${filename}`;
-          } catch (err) {
-            return 'error: ' + (err && err.message ? err.message : err);
+          if (typeof window._openXlsxModal === 'function') {
+            window._openXlsxModal(dataset_id);
+            return 'dialog opened';
           }
+          return 'modal unavailable';
         }
         """,
         Output("download-report-status", "children"),
@@ -1624,11 +1802,204 @@ def register_dash(app):
                  background: #f0f4fa; border: 1px solid #c5d3e7; border-radius: 4px; font-size: 12px; }
       .agg-bar-label { font-weight: 600; color: #1f4d8c; }
       .agg-stat { font-family: "Consolas", "Menlo", monospace; color: #333; min-width: 90px; }
+      .not-generated-banner {
+        padding: 14px 18px; margin: 0 0 16px;
+        background: #fff3cd; border: 1px solid #ffd966; border-radius: 6px;
+        color: #856404; font-size: 13px; font-weight: 600; text-align: center;
+        letter-spacing: 0.02em;
+      }
+      .distribution-tab > .not-generated-banner { margin: 16px; }
+
+      /* ── XLSX download modal ─────────────────────────────────────────────── */
+      .xlsx-modal-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,.45);
+        display: none; align-items: center; justify-content: center;
+        z-index: 9999;
+      }
+      .xlsx-modal-overlay.open { display: flex; }
+      .xlsx-modal-box {
+        background: #fff; border-radius: 12px; padding: 26px 28px 22px;
+        width: 440px; max-width: calc(100vw - 32px);
+        box-shadow: 0 8px 32px rgba(0,0,0,.22);
+      }
+      .xlsx-modal-title {
+        font-size: 15px; font-weight: 700; color: #1a1a2e;
+        margin-bottom: 6px;
+      }
+      .xlsx-modal-desc {
+        font-size: 12px; color: #555; line-height: 1.55; margin-bottom: 18px;
+      }
+      .xlsx-modal-buttons {
+        display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;
+      }
+      .xlsx-btn {
+        height: 36px; padding: 0 16px; border-radius: 6px;
+        border: 1px solid #d0d5dd; background: #fff;
+        font-size: 12px; font-weight: 600; cursor: pointer; color: #333;
+        transition: background .12s, border-color .12s;
+      }
+      .xlsx-btn:hover { background: #f0f6ff; border-color: #4a90e2; color: #4a90e2; }
+      .xlsx-btn-primary {
+        background: #4a90e2; color: #fff; border-color: #4a90e2;
+      }
+      .xlsx-btn-primary:hover { background: #3a7cc5; color: #fff; }
+      .xlsx-btn-cancel { color: #888; }
+      .xlsx-btn-cancel:hover { background: #fee2e2; border-color: #dc2626; color: #dc2626; }
+      .xlsx-progress-wrap { margin-top: 4px; }
+      .xlsx-progress-label {
+        font-size: 12px; font-weight: 600; color: #333; margin-bottom: 8px;
+        min-height: 16px;
+      }
+      .xlsx-progress-bar {
+        height: 14px; background: #e5e7eb; border-radius: 7px; overflow: hidden;
+      }
+      .xlsx-progress-fill {
+        height: 100%; width: 0%; transition: width .35s ease;
+        background: linear-gradient(90deg, #4a90e2, #3a7cc5);
+      }
+      .xlsx-progress-fill.error { background: #dc2626; }
+      .xlsx-progress-pct {
+        font-family: "Consolas", "Menlo", monospace;
+        font-size: 11px; color: #555; margin-top: 6px; text-align: right;
+      }
     </style>
   </head>
   <body>
     {%app_entry%}
     <footer>{%config%}{%scripts%}{%renderer%}</footer>
+
+    <!-- Excel download modal (vanilla JS, Dash callback 외부) -->
+    <div id="xlsx-modal" class="xlsx-modal-overlay" role="dialog" aria-modal="true">
+      <div class="xlsx-modal-box">
+        <div class="xlsx-modal-title">Excel Download</div>
+
+        <div id="xlsx-modal-ask">
+          <div class="xlsx-modal-desc">
+            원본 CSV 데이터를 <b>raw_&lt;source&gt;</b> 시트로 함께 포함할까요?
+            <br>(분량이 클 경우 처리 시간이 길어질 수 있습니다.)
+          </div>
+          <div class="xlsx-modal-buttons">
+            <button id="xlsx-cancel" class="xlsx-btn xlsx-btn-cancel" type="button">취소</button>
+            <button id="xlsx-no-raw" class="xlsx-btn" type="button">아니오 — Report 만</button>
+            <button id="xlsx-with-raw" class="xlsx-btn xlsx-btn-primary" type="button">예 — RAW 포함</button>
+          </div>
+        </div>
+
+        <div id="xlsx-modal-prog" class="xlsx-progress-wrap" style="display:none;">
+          <div class="xlsx-progress-label" id="xlsx-progress-label">준비 중…</div>
+          <div class="xlsx-progress-bar">
+            <div class="xlsx-progress-fill" id="xlsx-progress-fill"></div>
+          </div>
+          <div class="xlsx-progress-pct" id="xlsx-progress-pct">0%</div>
+          <div class="xlsx-modal-buttons" style="margin-top:14px;">
+            <button id="xlsx-close" class="xlsx-btn xlsx-btn-cancel" type="button" style="display:none;">닫기</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    (function () {
+      let _datasetId = null;
+      let _running   = false;
+
+      const $ = (id) => document.getElementById(id);
+
+      function showAsk() {
+        $('xlsx-modal-ask').style.display  = '';
+        $('xlsx-modal-prog').style.display = 'none';
+        $('xlsx-progress-fill').classList.remove('error');
+        $('xlsx-progress-fill').style.width = '0%';
+        $('xlsx-progress-pct').textContent  = '0%';
+        $('xlsx-progress-label').textContent = '준비 중…';
+        $('xlsx-close').style.display = 'none';
+      }
+      function openModal() { $('xlsx-modal').classList.add('open'); }
+      function closeModal() {
+        if (_running) return;          // 진행 중 닫기 차단
+        $('xlsx-modal').classList.remove('open');
+      }
+
+      window._openXlsxModal = function (dsId) {
+        _datasetId = dsId;
+        showAsk();
+        openModal();
+      };
+
+      async function start(includeRaw) {
+        if (!_datasetId || _running) return;
+        _running = true;
+        $('xlsx-modal-ask').style.display  = 'none';
+        $('xlsx-modal-prog').style.display = '';
+        const lbl  = $('xlsx-progress-label');
+        const fill = $('xlsx-progress-fill');
+        const pct  = $('xlsx-progress-pct');
+
+        try {
+          const r = await fetch(`/api/${_datasetId}/report_xlsx_start`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ include_raw: !!includeRaw }),
+          });
+          if (!r.ok) throw new Error('빌드 시작 실패 (HTTP ' + r.status + ')');
+          const { job_id } = await r.json();
+
+          // poll
+          while (true) {
+            await new Promise(res => setTimeout(res, 400));
+            const pr = await fetch(`/api/${_datasetId}/report_xlsx_progress/${job_id}`,
+                                   { cache: 'no-store' });
+            if (!pr.ok) throw new Error('진행률 조회 실패 (HTTP ' + pr.status + ')');
+            const ps = await pr.json();
+            const p = ps.percent || 0;
+            fill.style.width = p + '%';
+            pct.textContent  = p + '%';
+            lbl.textContent  = ps.stage || '진행 중';
+            if (ps.error) throw new Error(ps.error);
+            if (ps.done)  break;
+          }
+
+          // download — showSaveFilePicker 는 폴링 후 user-gesture 가 소실되어
+          // "Must be handling a user gesture" 에러가 나므로 사용하지 않는다.
+          // 대신 항상 anchor download 로 처리.
+          lbl.textContent = '다운로드 중…';
+          const dl = await fetch(`/api/${_datasetId}/report_xlsx_download/${job_id}`);
+          if (!dl.ok) throw new Error('다운로드 실패 (HTTP ' + dl.status + ')');
+          const blob = await dl.blob();
+          const filename = `${_datasetId}_report${includeRaw ? '_with_raw' : ''}.xlsx`;
+          const u = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = u; a.download = filename;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(u), 1500);
+          lbl.textContent = '다운로드 완료: ' + filename;
+          _running = false;
+          $('xlsx-close').style.display = '';
+          setTimeout(() => { if (!_running) closeModal(); }, 1500);
+        } catch (e) {
+          _running = false;
+          lbl.textContent = 'Error: ' + (e && e.message ? e.message : e);
+          fill.classList.add('error');
+          $('xlsx-close').style.display = '';
+        }
+      }
+
+      document.addEventListener('click', (e) => {
+        const t = e.target;
+        if (!t || !t.id) {
+          if (t === $('xlsx-modal')) closeModal();
+          return;
+        }
+        if (t.id === 'xlsx-with-raw') start(true);
+        else if (t.id === 'xlsx-no-raw') start(false);
+        else if (t.id === 'xlsx-cancel' || t.id === 'xlsx-close') closeModal();
+        else if (t.id === 'xlsx-modal')  closeModal();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeModal();
+      });
+    })();
+    </script>
   </body>
 </html>"""
     return dash_app
