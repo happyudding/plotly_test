@@ -7,6 +7,7 @@ from config import (
     REPORT_S3_ENDPOINT,
     REPORT_S3_FAIL_PREFIX,
     REPORT_S3_ISSUE_PREFIX,
+    REPORT_S3_MAX_POOL_CONNECTIONS,
     REPORT_S3_PREFIX,
     REPORT_S3_REGION,
     REPORT_S3_SECRET_KEY,
@@ -41,9 +42,16 @@ def get_s3_client():
     except ImportError as exc:
         raise S3NotConfigured(f"boto3 not installed: {exc}") from exc
 
+    # max_pool_connections: 동시 사용자/스레드가 같은 client 를 공유하므로
+    # 기본 10 은 너무 작다. config.py 의 REPORT_S3_MAX_POOL_CONNECTIONS (기본 30) 사용.
+    # 풀이 부족하면 추가 요청이 connection 자리가 날 때까지 잠깐 대기 → 사용자간 대기 유발.
     kwargs = {
         "region_name": REPORT_S3_REGION or "us-east-1",
-        "config": Config(signature_version="s3v4", retries={"max_attempts": 3}),
+        "config": Config(
+            signature_version="s3v4",
+            retries={"max_attempts": 3},
+            max_pool_connections=REPORT_S3_MAX_POOL_CONNECTIONS,
+        ),
     }
     if REPORT_S3_ENDPOINT:
         kwargs["endpoint_url"] = REPORT_S3_ENDPOINT

@@ -3,12 +3,12 @@ setlocal
 
 set "ROOT=%~dp0"
 if not defined PORT set "PORT=8000"
-if not defined HOST set "HOST=127.0.0.1"
+rem 같은 LAN(회사/집 네트워크) 의 다른 PC 에서 접근하려면 0.0.0.0 으로 bind.
+rem 이 PC 에서만 접근하려면: set HOST=127.0.0.1 && start.bat
+if not defined HOST set "HOST=0.0.0.0"
 if not defined DATASET set "DATASET=current"
 
 rem Resolve Python interpreter.
-rem   PY_CMD is the already-quoted interpreter (plus optional launcher args).
-rem   Examples: "C:\Python313\python.exe"   or   py -3
 set "PY_CMD="
 
 if defined PYTHON (
@@ -37,15 +37,14 @@ echo [start] Set PYTHON env var, create .venv, or add python to PATH.
 exit /b 1
 
 :py_ok
-echo [start] Python: %PY_CMD%
-echo [start] Host:   %HOST%
-echo [start] Port:   %PORT%
+echo [start] Python    : %PY_CMD%
+echo [start] Bind host : %HOST%
+echo [start] Port      : %PORT%
 
 call "%ROOT%terminate.bat"
 
 echo.
 echo [start] Starting server on %HOST%:%PORT% ...
-rem PY_CMD already contains quotes when it is a path; first quoted arg to start is the window title.
 start "plotly-dashboard" /D "%ROOT%" %PY_CMD% -u wsgi.py
 
 echo [start] Waiting for server to listen (up to 60s) ...
@@ -55,9 +54,25 @@ if errorlevel 1 (
     exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -Uri 'http://%HOST%:%PORT%/pe/report/' -UseBasicParsing -TimeoutSec 15; Write-Output ('[start] HTTP ' + $r.StatusCode) } catch { Write-Output ('[start] HTTP check failed: ' + $_.Exception.Message) }"
+rem Health check via localhost (서버 자신에서는 항상 접근 가능)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:%PORT%/pe/report/' -UseBasicParsing -TimeoutSec 15; Write-Output ('[start] HTTP ' + $r.StatusCode) } catch { Write-Output ('[start] HTTP check failed: ' + $_.Exception.Message) }"
 
-echo [start] URL: http://%HOST%:%PORT%/pe/report/
-start "" "http://%HOST%:%PORT%/pe/report/"
+echo.
+echo [start] ===== Accessible URLs =====
+echo [start] Local (이 PC)              : http://127.0.0.1:%PORT%/pe/report/
+
+if /I "%HOST%"=="0.0.0.0" (
+    echo [start] LAN ^(같은 네트워크 다른 PC^):
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -in @('Dhcp','Manual') } | Select-Object -ExpandProperty IPAddress -Unique; if ($ips) { foreach ($ip in $ips) { Write-Host ('[start]                              http://' + $ip + ':%PORT%/pe/report/') } } else { Write-Host '[start]                              (LAN IPv4 주소를 찾지 못함)' }"
+
+    echo.
+    echo [start] ** 처음 외부 PC 에서 접근 시 Windows Defender 방화벽이 차단할 수 있습니다.
+    echo [start]    차단 시 관리자 권한 PowerShell 에서 1회 실행:
+    echo [start]      New-NetFirewallRule -DisplayName "plotly-dashboard %PORT%" -Direction Inbound -LocalPort %PORT% -Protocol TCP -Action Allow
+)
+echo [start] ============================
+echo.
+
+start "" "http://127.0.0.1:%PORT%/pe/report/"
 
 endlocal

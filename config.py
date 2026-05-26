@@ -59,6 +59,11 @@ REPORT_S3_THUMB_PREFIX = os.getenv("REPORT_S3_THUMB_PREFIX", "pe/report/thumbs")
 # SVG thumbnail upload concurrency (분석 1회당 2000장 정도 업로드)
 REPORT_THUMB_WORKERS   = int(os.getenv("REPORT_THUMB_WORKERS", "8"))
 
+# boto3 S3 client HTTP connection pool 크기.
+# 기본 10 은 너무 작아 동시 분석 다수가 PUT/GET 시 풀에서 줄서기 발생.
+# 동시 사용자 10명 × thumb_workers 8 = 80 동시 요청 가능 → 30~50 권장.
+REPORT_S3_MAX_POOL_CONNECTIONS = int(os.getenv("REPORT_S3_MAX_POOL_CONNECTIONS", "30"))
+
 REPORT_LOCK_TTL_SEC = 300
 REPORT_LOCK_POLL_SEC = 0.5
 REPORT_LOCK_MAX_WAIT_SEC = 60
