@@ -19,7 +19,7 @@ REPORT_ANALYSIS_INDEX_HTML = ROOT_DIR / "report" / "report_analysis_index.html"
 REPORT_VIEW_HTML           = ROOT_DIR / "report" / "report_view.html"
 SCHOOL_FILES_GLOB = os.getenv("SCHOOL_FILES_GLOB", "*_school_renamed.csv")
 
-META_COLUMNS = ["DUT", "XCoord", "YCoord", "Bin"]
+META_COLUMNS = ["DUT", "XCoord", "YCoord", "Bin", "Serial"]
 N_META_COLUMNS = len(META_COLUMNS)
 
 SUBJECT_NAME_ROW, UNITS_ROW, LOWER_LIMIT_ROW, UPPER_LIMIT_ROW = 0, 1, 2, 3
