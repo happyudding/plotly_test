@@ -1,51 +1,46 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 
 
-def preprocess_file_to_df(file_path: str) -> pd.DataFrame:
-    """파일을 표준 포맷의 DataFrame 으로 변환.
+def preprocess_file_to_df(file_path) -> pd.DataFrame:
+    """전처리 진입점.
 
-    표준 포맷 (header=None 으로 읽었을 때):
-        Row 0:  [DUT, XCoord, YCoord, Bin, Serial, item1, item2, ...]
-        Row 1:  [Units,       None, None, None, None, "V",  "mA", ...]
-        Row 2:  [Lower Limit, None, None, None, None, 0.1,  5.0,  ...]
-        Row 3:  [Upper Limit, None, None, None, None, 1.5,  20.0, ...]
-        Row 6+: 측정 데이터
-
-    병합 방법:
-        본문을 아래처럼 교체하면 analyze / preview_items 양쪽에 자동 적용.
-            from your_module import csvfiles_to_df
-            return csvfiles_to_df(file_path)
+    preprocessor_fromhoney.csvfile_to_df 의 반환 구조를 받아서
+    downstream code (iloc positional 접근) 가 기대하는 canonical 포맷으로 변환.
     """
-    path = Path(file_path)
-    try:
-        if path.suffix.lower() == ".xlsx":
-            df = pd.read_excel(path, header=None)
-        else:
-            df = pd.read_csv(path, header=None)
-    except Exception:
-        return pd.DataFrame()
-
-    return _ensure_serial_column(df)
+    from analysis.preprocessor_fromhoney import csvfile_to_df
+    df = csvfile_to_df(file_path)
+    return _to_canonical(df)
 
 
-def _ensure_serial_column(df: pd.DataFrame) -> pd.DataFrame:
-    """Serial 컬럼이 4번 인덱스에 없으면 None 컬럼으로 삽입.
-
-    옛 school.csv 같은 4-메타 포맷을 5-메타 표준 포맷으로 끌어올림.
-    이미 새 포맷(Row 0 Col 4 == "Serial")이면 그대로 반환.
+def _to_canonical(df: pd.DataFrame) -> pd.DataFrame:
+    """downstream 이 iloc[0, N_META:] 로 subject 를 읽으므로,
+    row 0 위치에 컬럼명(또는 subject 이름) 이 들어가도록 통일하고
+    df.columns 는 정수 인덱스로 reset.
     """
-    if df.empty or df.shape[1] < 5:
-        return df
-    if str(df.iat[0, 4]).strip().lower() == "serial":
+    if df.empty:
         return df
 
-    left = df.iloc[:, :4].reset_index(drop=True)
-    right = df.iloc[:, 4:].reset_index(drop=True)
-    serial = pd.DataFrame({"_s": [None] * len(df)})
-    out = pd.concat([left, serial, right], axis=1, ignore_index=True)
-    out.iat[0, 4] = "Serial"
+    cols = list(df.columns)
+
+    # 케이스 1: 정수 컬럼 (header=None 스타일) → 이미 canonical
+    if all(isinstance(c, int) for c in cols):
+        return df
+
+    # 케이스 2 / 3 판별: row 0 가 컬럼명과 동일한가?
+    row0 = [str(v) for v in df.iloc[0].tolist()]
+    col_strs = [str(c) for c in cols]
+
+    if row0 == col_strs:
+        # 케이스 2 (Structure A): row 0 가 이미 컬럼명 중복.
+        # 컬럼 라벨만 정수로 reset 하면 downstream positional 접근과 정렬됨.
+        out = df.copy()
+        out.columns = range(len(cols))
+        return out
+
+    # 케이스 3 (Structure B): row 0 가 Units 등. 컬럼명을 row 0 로 prepend.
+    header_row = pd.DataFrame([cols], columns=cols)
+    out = pd.concat([header_row, df], ignore_index=True)
+    out.columns = range(len(cols))
     return out
