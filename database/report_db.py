@@ -16,6 +16,11 @@ CREATE TABLE IF NOT EXISTS report_session (
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER,
     error_message TEXT,
+    product_type  TEXT,
+    process       TEXT,
+    product       TEXT,
+    revision      TEXT,
+    dataset_id    TEXT,
     lot_id        TEXT,
     password      TEXT,
     is_debug      INTEGER DEFAULT 0
