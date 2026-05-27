@@ -1,9 +1,33 @@
 import os
+import socket
 import time
 
 
 def _log(msg):
     print(f"[wsgi] {msg}", flush=True)
+
+
+def _lan_ips():
+    """이 호스트의 non-loopback IPv4 주소 목록."""
+    ips = set()
+    try:
+        for ai in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = ai[4][0]
+            if not ip.startswith("127.") and not ip.startswith("169.254."):
+                ips.add(ip)
+    except Exception:
+        pass
+    # 보조: UDP 소켓 트릭으로 기본 라우트의 IP 얻기 (가상 어댑터 등 누락 보완)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            ips.add(s.getsockname()[0])
+        finally:
+            s.close()
+    except Exception:
+        pass
+    return sorted(ips)
 
 
 _t0 = time.perf_counter()
@@ -31,8 +55,26 @@ except RuntimeError as exc:
 _log(f"app ready in {time.perf_counter() - _t0:.2f}s")
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "127.0.0.1")
+    # 기본값을 0.0.0.0 으로 둠 → LAN 의 다른 PC 에서도 접속 가능.
+    # 로컬 전용으로 쓰려면: set HOST=127.0.0.1
+    host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
     debug = os.getenv("FLASK_DEBUG", "0") == "1"
+
+    _log("===== Accessible URLs =====")
+    _log(f"Local (이 PC)               : http://127.0.0.1:{port}/pe/report/")
+    if host in ("0.0.0.0", "::", ""):
+        ips = _lan_ips()
+        if ips:
+            for ip in ips:
+                _log(f"LAN (같은 네트워크 다른 PC) : http://{ip}:{port}/pe/report/")
+        else:
+            _log("LAN: IPv4 주소를 찾지 못함 (ipconfig 로 직접 확인)")
+        _log("** 처음 외부 PC 에서 접근 시 Windows 방화벽 허용 필요할 수 있음:")
+        _log(f'   New-NetFirewallRule -DisplayName "plotly-dashboard {port}" -Direction Inbound -LocalPort {port} -Protocol TCP -Action Allow')
+    else:
+        _log(f"(HOST={host} 으로 bind — LAN 노출 안 됨. LAN 접근하려면 HOST 환경변수 제거)")
+    _log("===========================")
+
     _log(f"starting server on http://{host}:{port} (debug={debug})")
     app.run(host=host, port=port, debug=debug, use_reloader=False, threaded=True)

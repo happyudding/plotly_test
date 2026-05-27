@@ -209,6 +209,146 @@ def _try_cairosvg(svg_path: Path, w: int, h: int) -> bytes | None:
         return None
 
 
+def _try_cairosvg_bytes(svg_text: str, w: int, h: int) -> bytes | None:
+    try:
+        import cairosvg
+        return cairosvg.svg2png(bytestring=svg_text.encode("utf-8"),
+                                output_width=w, output_height=h)
+    except Exception:
+        return None
+
+
+def _build_compact_svg_text(dataset_id: str, subject_id: int) -> str | None:
+    """charts/<sid>.json + tables/meta.json 으로부터 compact SVG 를 즉석 생성.
+
+    issue_table 용 — 디스크에 캐시된 일반 SVG 는 title/subtitle 여백이 커서
+    썸네일 크기에서 산포가 거의 안 보임. compact 모드는 여백 축소 + 마커 굵게.
+    """
+    chart_path = DATASETS_DIR / dataset_id / "charts" / f"{subject_id}.json"
+    meta_path  = DATASETS_DIR / dataset_id / "tables" / "meta.json"
+    if not (chart_path.exists() and meta_path.exists()):
+        return None
+    try:
+        chart = json.loads(chart_path.read_text(encoding="utf-8"))
+        meta  = json.loads(meta_path.read_text(encoding="utf-8"))
+        subj = next(
+            (s for s in (meta.get("subjects") or []) if s.get("subject_id") == subject_id),
+            None,
+        )
+        if not subj:
+            return None
+        # plotly trace 형식 → svg_builder 가 기대하는 {school, color, xs, ys}
+        traces = []
+        for t in (chart.get("data") or []):
+            color = (t.get("marker") or {}).get("color", "#000000")
+            traces.append({
+                "school": t.get("name", ""),
+                "color":  color,
+                "xs":     t.get("x", []),
+                "ys":     t.get("y", []),
+            })
+        from analysis.svg_builder import build_subject_svg
+        return build_subject_svg(
+            subject_id,
+            subj.get("subject", ""),
+            subj.get("units", ""),
+            subj.get("lower_limit"),
+            subj.get("upper_limit"),
+            traces,
+            chart.get("layout") or {},
+            compact=True,
+        )
+    except Exception:
+        return None
+
+
+def _compactify_plotly_layout(layout: dict) -> dict:
+    """plotly layout 을 썸네일용 compact 로 수정 (margin / font 축소)."""
+    out = json.loads(json.dumps(layout))
+    out["margin"] = {"l": 35, "r": 10, "t": 22, "b": 30}
+    out.setdefault("font", {})["size"] = 8
+    if "title" in out:
+        out["title"].setdefault("font", {})["size"] = 10
+    for axis_key in ("xaxis", "yaxis"):
+        if axis_key in out:
+            out[axis_key].setdefault("tickfont", {})["size"] = 7
+            ax_title = out[axis_key].get("title")
+            if isinstance(ax_title, str):
+                # 문자열 → dict 로 승격 후 font 적용
+                out[axis_key]["title"] = {"text": ax_title, "font": {"size": 7}}
+            elif isinstance(ax_title, dict):
+                ax_title.setdefault("font", {})["size"] = 7
+    return out
+
+
+def _try_kaleido_compact(dataset_id: str, subject_id: int, w: int, h: int) -> bytes | None:
+    """kaleido 로 layout 만 compact 하게 수정해서 PNG 생성."""
+    chart_path = DATASETS_DIR / dataset_id / "charts" / f"{subject_id}.json"
+    if not chart_path.exists():
+        return None
+    try:
+        import plotly.io as pio
+        payload = json.loads(chart_path.read_text(encoding="utf-8"))
+        layout = _compactify_plotly_layout(payload.get("layout") or {})
+        # 마커도 좀 더 크게 (썸네일 사이즈에서 가시성 확보)
+        data = []
+        for t in (payload.get("data") or []):
+            t_new = dict(t)
+            if "marker" in t_new:
+                m = dict(t_new["marker"])
+                m["size"] = max(4, int(m.get("size", 5) * 0.9))
+                t_new["marker"] = m
+            data.append(t_new)
+        return pio.to_image(
+            {"data": data, "layout": layout},
+            format="png", width=w, height=h, scale=2,
+        )
+    except Exception:
+        return None
+
+
+def _get_compact_thumb_png(dataset_id: str, subject_id: int,
+                           w: int = None, h: int = None) -> bytes | None:
+    """issue_table 용 압축 썸네일 PNG. fail_pngs/<sid>_c.png 에 캐시.
+
+    우선순위:
+      1. cairosvg ← compact SVG (libcairo 있을 때만)
+      2. kaleido  ← compact layout (plotly, 항상 동작)
+      3. 일반 _get_thumb_png (최후 폴백)
+    """
+    w = w or THUMB_W_PX
+    h = h or THUMB_H_PX
+    cache_dir  = DATASETS_DIR / dataset_id / "fail_pngs"
+    cache_path = cache_dir / f"{subject_id}_c.png"
+
+    use_cache = (w == THUMB_W_PX and h == THUMB_H_PX)
+    if use_cache:
+        with _png_lock:
+            if cache_path.exists():
+                return cache_path.read_bytes()
+
+    png = None
+
+    # 1. cairosvg + compact SVG
+    svg_text = _build_compact_svg_text(dataset_id, subject_id)
+    if svg_text:
+        png = _try_cairosvg_bytes(svg_text, w, h)
+
+    # 2. kaleido + compact layout
+    if png is None:
+        png = _try_kaleido_compact(dataset_id, subject_id, w, h)
+
+    # 3. 마지막 폴백
+    if png is None:
+        png = _get_thumb_png(dataset_id, subject_id, w, h)
+
+    if png is not None and use_cache:
+        with _png_lock:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(png)
+    return png
+
+
 def _try_pil_resize(png_bytes: bytes, w: int, h: int) -> bytes | None:
     try:
         from PIL import Image as PILImage
@@ -614,7 +754,8 @@ def _sheet_issue_table(wb, dataset_id, fail_items, sources, issue_comments):
         # 1) 정상 변환 시 PNG 임베드
         # 2) 변환 실패 시 셀에 thumbnail 직접 URL 하이퍼링크 + 안내 텍스트
         if sid is not None:
-            png = _get_thumb_png(dataset_id, sid)
+            # issue_table 은 산포가 잘 보이도록 compact SVG 로 별도 렌더링
+            png = _get_compact_thumb_png(dataset_id, sid)
             if png:
                 _add_image(ws, png, f"{get_column_letter(dist_col)}{r_idx}",
                            THUMB_W_PX, THUMB_H_PX)
