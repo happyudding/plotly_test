@@ -672,27 +672,15 @@ fileStartBtn.addEventListener("click", async () => {
   }
 });
 
-// CSV 첫 줄에서 subject 이름들(META 컬럼 4개 이후) 추출. 여러 파일 union(순서 유지).
+// 파일을 서버 /preview_items 로 전송해 subject 이름 목록을 받아온다.
+// 암호화 파일은 클라이언트에서 직접 파싱 불가 → 서버의 전처리 훅을 경유.
 async function extractItemsFromFiles(files) {
-  const META_COLS = 4;  // DUT, XCoord, YCoord, Bin
-  const seen = new Set();
-  const out = [];
-  for (const f of files) {
-    // 처음 일부 바이트만 읽어도 첫 줄은 잡힘. 안전하게 64KB.
-    const slice = f.slice(0, 64 * 1024);
-    let text = await slice.text();
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);  // strip BOM
-    const firstLine = text.split(/\r?\n/)[0] || "";
-    const cols = parseCsvLine(firstLine);
-    for (let i = META_COLS; i < cols.length; i++) {
-      const name = (cols[i] || "").trim();
-      if (!name) continue;
-      if (seen.has(name)) continue;
-      seen.add(name);
-      out.push(name);
-    }
-  }
-  return out;
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f, f.name);
+  const resp = await fetch("/pe/report/preview_items", { method: "POST", body: fd });
+  if (!resp.ok) throw new Error(`preview_items ${resp.status}`);
+  const data = await resp.json();
+  return data.items || [];
 }
 
 // 간단한 CSV 한 줄 파서 (따옴표/이스케이프 지원).

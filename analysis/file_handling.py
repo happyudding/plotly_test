@@ -40,6 +40,15 @@ def df_read_csv_files(file_path):
 
 
 def csvfile_to_df(file_path):
+    # 전처리 훅 우선 시도 (analysis/preprocessor.py 교체 시 자동 적용)
+    try:
+        from analysis.preprocessor import preprocess_file_to_df
+        df = preprocess_file_to_df(str(file_path))
+        if df is not None:
+            return df
+    except Exception:
+        pass
+
     path = Path(file_path)
     suffix = path.suffix.lower()
 

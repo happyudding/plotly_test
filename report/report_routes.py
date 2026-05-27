@@ -13,11 +13,14 @@ from database import report_db
 from s3_storage import report_s3
 from config import (
     INPUT_DIR,
+    N_META_COLUMNS,
     REPORT_ANALYSIS_INDEX_HTML,
     REPORT_UPLOAD_DIR,
     REPORT_VIEW_HTML,
     SCHOOL_FILES_GLOB,
+    SUBJECT_NAME_ROW,
 )
+from analysis.file_handling import csvfile_to_df
 from report.report_analysis_service import (
     AnalysisError,
     AnalysisLockTimeout,
@@ -57,6 +60,11 @@ def _is_safe_csv_name(name):
     return bool(name) and name.lower().endswith(".csv")
 
 
+def _is_safe_data_name(name):
+    """CSV / XLSX 모두 허용 (preview_items용)."""
+    return bool(name) and name.lower().endswith((".csv", ".xlsx"))
+
+
 def _resolve_under_upload_dir(path):
     base = REPORT_UPLOAD_DIR.resolve()
     resolved = Path(path).resolve()
@@ -78,6 +86,46 @@ def _upload_csvs_to_s3(saved_paths, analysis_key):
             uri = report_s3.make_s3_uri(s3_key)
             data = path.read_bytes() if path.exists() else b""
         report_db.upsert_csv_file(analysis_key, path.name, s3_key, uri, len(data))
+
+
+@report_bp.post("/preview_items")
+def preview_items():
+    """파일을 전처리 훅으로 읽어 Subject 이름 목록을 반환.
+
+    암호화 파일을 클라이언트에서 직접 파싱할 수 없으므로
+    서버에서 csvfile_to_df() (→ preprocessor 훅) 를 경유해 subject 이름을 추출한다.
+    임시 파일은 처리 후 즉시 삭제됨.
+    """
+    files = request.files.getlist("files")
+    if not files:
+        abort(400, "no files")
+
+    tmp_dir = REPORT_UPLOAD_DIR / f"preview_{secrets.token_hex(4)}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    seen = set()
+    subjects = []
+    try:
+        for f in files:
+            name = secure_filename(f.filename or "")
+            if not _is_safe_data_name(name):
+                continue
+            dest = tmp_dir / name
+            f.save(str(dest))
+            try:
+                df = csvfile_to_df(str(dest))
+                row = df.iloc[SUBJECT_NAME_ROW, N_META_COLUMNS:]
+                for s in row:
+                    s = str(s).strip()
+                    if s and s not in seen:
+                        seen.add(s)
+                        subjects.append(s)
+            except Exception:
+                pass
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return jsonify({"items": subjects})
 
 
 @report_bp.post("/analyze")
